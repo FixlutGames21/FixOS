@@ -3,7 +3,7 @@ local computer = require("computer")
 local fs = require("filesystem")
 local http = component.http
 
-local base_url = "https://raw.githubusercontent.com/Fixlut/FixOS/main"
+local base_url = "https://raw.githubusercontent.com/FixlutGames21/FixOS/main"
 
 local files = {
   ["/boot/init.lua"] = base_url .. "/boot/init.lua",
