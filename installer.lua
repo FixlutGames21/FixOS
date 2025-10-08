@@ -1,6 +1,5 @@
--- FixOS Installer v5 (PRO SYSTEM EDITION)
+-- FixOS Installer v5.1 (Stable)
 -- Author: Fixlut & GPT
--- Compatible with OpenComputers
 
 local component = require("component")
 local computer = require("computer")
@@ -51,8 +50,24 @@ end
 
 local function formatDisk(disk)
   printc("🧹 Форматування диска...")
-  for file in disk.list("/") do
-    disk.remove(file)
+  for file in pairs(disk.list("/")) do
+    local path = "/" .. file
+    if disk.isDirectory(path) then
+      local function removeDir(dir)
+        for sub in pairs(disk.list(dir)) do
+          local subPath = dir .. sub
+          if disk.isDirectory(subPath) then
+            removeDir(subPath .. "/")
+          else
+            disk.remove(subPath)
+          end
+        end
+        disk.remove(dir)
+      end
+      removeDir(path .. "/")
+    else
+      disk.remove(path)
+    end
   end
 end
 
@@ -108,7 +123,7 @@ end
 -- MAIN INSTALLER LOGIC
 ---------------------------------------
 term.clear()
-printc("💿 Вітаємо у FixOS Installer v5!")
+printc("💿 Вітаємо у FixOS Installer v5.1!")
 os.sleep(1)
 
 if not checkInternet() then return end
