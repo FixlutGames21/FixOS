@@ -1,91 +1,106 @@
--- FixBIOS.lua (this string gets written to EEPROM by installer)
+-- FixBIOS vPro (EEPROM firmware)
+-- Автори: Fixlut & GPT
+-- Версія: 1.0 Pro Stable
+
 local component = component
 local computer = computer
 
-local function safeList(kind)
+local function findProxy(kind)
   for addr, t in component.list() do
-    if t == kind then return addr end
+    if t == kind then return component.proxy(addr) end
   end
   return nil
 end
 
--- GPU & screen
-local gpuAddr = safeList("gpu")
-local screenAddr = safeList("screen")
-local gpu = nil
-if gpuAddr and screenAddr then
-  gpu = component.proxy(gpuAddr)
-  gpu.bind(screenAddr)
-  -- try a safe smaller res
-  local ok, w,h = pcall(function() return gpu.getResolution() end)
-  if ok and w and h and w >= 50 and h >= 16 then
-    gpu.setResolution(50,16)
-  end
-  gpu.setBackground(0x000000)
-  gpu.setForeground(0x00FF00)
-  gpu.fill(1,1,50,16," ")
+local gpu = findProxy("gpu")
+local screen = findProxy("screen")
+if gpu and screen then
+  pcall(function()
+    gpu.bind(screen.address)
+    gpu.setBackground(0x000000)
+    gpu.setForeground(0x00FF00)
+    local w, h = gpu.getResolution()
+    gpu.fill(1, 1, w, h, " ")
+    gpu.set(2, 2, "FixBIOS vPro Bootloader")
+    gpu.set(2, 3, "© Fixlut Studios 2025")
+    gpu.set(2, 5, "Performing POST...")
+  end)
 end
 
-local function println(s)
-  if gpu then
-    local y = (println._line or 1)
-    gpu.set(2, y, tostring(s))
-    println._line = y + 1
-  end
+local function log(msg)
+  if gpu then gpu.set(2, 7, tostring(msg)) end
 end
 
--- Splash ASCII
-if gpu then
-  gpu.fill(1,1,50,16," ")
-  gpu.set(6,3,"███████╗██╗██╗  ██╗ ██████╗ ███████╗")
-  gpu.set(6,4,"██╔════╝██║██║ ██╔╝██╔═══██╗██╔════╝")
-  gpu.set(6,5,"███████╗██║█████╔╝ ██║   ██║█████╗  ")
-  gpu.set(6,6,"╚════██║██║██╔═██╗ ██║   ██║██╔══╝  ")
-  gpu.set(6,7,"███████║██║██║  ██╗╚██████╔╝██║     ")
-  gpu.set(6,8,"╚══════╝╚═╝╚═╝  ╚═╝ ╚═════╝ ╚═╝     ")
-  gpu.set(18,10,"FixOS BIOS")
-  gpu.set(16,12,"Starting system...")
-  os.sleep(1.4)
-  gpu.fill(1,1,50,16," ")
-end
-
--- POST
-println("FixBIOS POST")
-local function post(name, ok) println(string.format("[%s] %s", ok and " OK " or "FAIL", name)) end
-post("Filesystem", safeList("filesystem") ~= nil)
-post("EEPROM", safeList("eeprom") ~= nil)
-post("GPU", gpu ~= nil)
-os.sleep(0.6)
-
-if not safeList("filesystem") then
-  println("No filesystem. Insert system disk and reboot.")
+local fs = findProxy("filesystem")
+if not fs then
+  log("No filesystem found. Insert disk and reboot.")
   return
 end
 
-local fsAddr = safeList("filesystem")
-local fs = component.proxy(fsAddr)
+local function loadFile(path)
+  local handle = fs.open(path, "r")
+  if not handle then return nil end
+  local data = ""
+  repeat
+    local chunk = fs.read(handle, math.huge)
+    if chunk then data = data .. chunk end
+  until not chunk
+  fs.close(handle)
+  return data
+end
 
-local bootPaths = {"/boot/fixos.lua", "/init.lua", "/os/init.lua"}
-for _, p in ipairs(bootPaths) do
-  if fs.exists(p) then
-    println("Booting: "..p)
-    local handle = fs.open(p, "r")
-    local data = ""
-    repeat
-      local chunk = fs.read(handle, math.huge)
-      data = data .. (chunk or "")
-    until not chunk
-    fs.close(handle)
-    local chunk, err = load(data, "="..p)
-    if not chunk then
-      println("Boot load error: "..tostring(err))
-      return
+local function runFile(path)
+  log("Loading: " .. path)
+  local data = loadFile(path)
+  if not data then log("Missing: " .. path) return false end
+  local ok, chunk = load(data, "=" .. path)
+  if not ok then log("Error: " .. tostring(chunk)) return false end
+  local succ, err = pcall(chunk)
+  if not succ then
+    log("Runtime error: " .. tostring(err))
+    os.sleep(2)
+    return false
+  end
+  return true
+end
+
+-- Boot sequence
+local bootPaths = {
+  "/boot/init.lua",
+  "/init.lua",
+  "/boot/fallback.lua",
+  "/boot/recovery.lua"
+}
+
+local booted = false
+for _, path in ipairs(bootPaths) do
+  if fs.exists(path) then
+    if runFile(path) then
+      booted = true
+      break
     end
-    println("Running FixOS")
-    chunk()
-    return
   end
 end
 
-println("FixOS not found on disk.")
-println("Please install FixOS and reboot.")
+if not booted then
+  log("FixOS not found. Opening BIOS shell...")
+  local function biosShell()
+    if gpu then gpu.set(2, 9, "BIOS Shell> ") end
+    local kb = findProxy("keyboard")
+    if not kb then log("No keyboard connected!") return end
+    local buf = ""
+    while true do
+      local ev, addr, ch, code, p4, p5 = computer.pullSignal()
+      if ev == "key_down" and ch == 13 then
+        if buf == "reboot" then computer.shutdown(true) end
+        runFile(buf)
+        buf = ""
+        gpu.set(2, 9, "BIOS Shell> ")
+      elseif ev == "key_down" and ch > 31 and ch < 127 then
+        buf = buf .. string.char(ch)
+        gpu.set(15 + #buf, 9, string.char(ch))
+      end
+    end
+  end
+  biosShell()
+end
