@@ -1,11 +1,12 @@
 -------------------------------------------------------
--- FixOS Installer PRO MAX v2
+-- FixOS Installer PRO MAX v3
 -- by Fixlut 💿
 -------------------------------------------------------
 local component = require("component")
 local term = require("term")
 local fs = require("filesystem")
 local shell = require("shell")
+local computer = require("computer") -- ✅ виправлено
 
 local gpu = component.isAvailable("gpu") and component.gpu or nil
 local inet = component.isAvailable("internet") and component.internet or nil
@@ -23,7 +24,7 @@ end
 local function banner()
   term.clear()
   print("====================================")
-  center("🚀  FIXOS INSTALLER  PRO  MAX v2  🚀")
+  center("🚀  FIXOS INSTALLER  PRO  MAX v3  🚀")
   print("====================================")
   print()
 end
@@ -89,7 +90,6 @@ for i, path in ipairs(files) do
     handle.close()
   end
 
-  -- detect HTML garbage
   if content:match("^%s*<") then
     io.stderr:write("\n❌  HTML instead of Lua at: " .. path .. "\n")
     io.stderr:write("Check your network or GitHub raw link.\n")
@@ -102,7 +102,22 @@ for i, path in ipairs(files) do
   os.sleep(0.05)
 end
 
+-------------------------------------------------------
+-- autorun setup
+-------------------------------------------------------
 print("\n\n✅  FixOS installed successfully!")
+print("💾  Creating autorun.lua ...")
+local autorun = io.open("/autorun.lua", "w")
+autorun:write([[
+term.clear()
+print("====================================")
+print("        🪟 Welcome to FixOS 🪟       ")
+print("====================================")
+os.sleep(1)
+shell.execute("/bin/shell.lua")
+]])
+autorun:close()
+
 print("💾  You can reboot now and enjoy FixOS.\n")
 
 local choice
