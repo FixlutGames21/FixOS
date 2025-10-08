@@ -15,7 +15,7 @@ term.clear()
 print("=====================================")
 print("       FixOS INSTALLER PRO v3")
 print("=====================================")
-os.sleep(0.5)
+computer.sleep(0.5)
 
 ---------------------------------------------
 -- Крок 1: Встановлення FixOS
@@ -33,7 +33,7 @@ local fixos = [[
 -- FixOS Boot File (boot/fixos.lua)
 -------------------------------------
 print("🔧 Booting FixOS...")
-os.sleep(0.5)
+computer.sleep(0.5)
 
 local fs = require("filesystem")
 local term = require("term")
@@ -75,8 +75,8 @@ print("\n⚙️  Writing FixBIOS to EEPROM...")
 
 local bios = [[
 -------------------------------------
--- FixBIOS v4 (Deluxe Edition)
--- by Fixlut & GPT
+-- FixBIOS v4
+-- by Fixlut
 -------------------------------------
 local component = component
 local computer = computer
@@ -211,7 +211,7 @@ io.write("\nReboot now? (y/n): ")
 local ans = io.read()
 if ans and ans:lower() == "y" then
   print("🔁 Rebooting...")
-  os.sleep(1)
+  computer.sleep(1)
   computer.shutdown(true)
 else
   print("🚫 Reboot canceled.")
