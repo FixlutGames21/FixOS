@@ -75,34 +75,37 @@ print("\n⚙️  Writing FixBIOS to EEPROM...")
 
 local bios = [[
 -------------------------------------
--- FixBIOS v3 (POST Boot System)
--- Created by Fixlut
+-- FixBIOS v4 (Deluxe Edition)
+-- by Fixlut & GPT
 -------------------------------------
 local component = component
 local computer = computer
-local unicode = unicode
 
--- Boot sequence paths
-local bootPaths = {
-  "/boot/fixos.lua",
-  "/init.lua",
-  "/os/init.lua"
-}
+-------------------------------------
+-- Safe component check
+-------------------------------------
+local function safeIsAvailable(name)
+  for addr, type in component.list() do
+    if type == name then return true end
+  end
+  return false
+end
 
--- GPU init
+-------------------------------------
+-- GPU setup
+-------------------------------------
 local gpu, screen = component.list("gpu")(), component.list("screen")()
 if gpu and screen then
   gpu = component.proxy(gpu)
   gpu.bind(screen)
   gpu.setResolution(50, 16)
-  gpu.setForeground(0x00FF00)
   gpu.setBackground(0x000000)
+  gpu.setForeground(0x00FF00)
   gpu.fill(1, 1, 50, 16, " ")
 else
   gpu = nil
 end
 
--- Print text safely
 local line = 1
 local function println(text)
   if gpu then
@@ -112,21 +115,38 @@ local function println(text)
 end
 
 -------------------------------------
--- POST (Power-On Self Test)
+-- Splash Screen
 -------------------------------------
-println("FixBIOS v3.0 initializing...")
+if gpu then
+  gpu.setForeground(0x00FF00)
+  gpu.fill(1, 1, 50, 16, " ")
+  gpu.set(8, 3, "███████╗██╗██╗  ██╗ ██████╗ ███████╗")
+  gpu.set(8, 4, "██╔════╝██║██║ ██╔╝██╔═══██╗██╔════╝")
+  gpu.set(8, 5, "███████╗██║█████╔╝ ██║   ██║█████╗  ")
+  gpu.set(8, 6, "╚════██║██║██╔═██╗ ██║   ██║██╔══╝  ")
+  gpu.set(8, 7, "███████║██║██║  ██╗╚██████╔╝██║     ")
+  gpu.set(8, 8, "╚══════╝╚═╝╚═╝  ╚═╝ ╚═════╝ ╚═╝     ")
+  gpu.setForeground(0xFFFFFF)
+  gpu.set(18, 10, "FixOS BIOS v4 — Deluxe Edition")
+  gpu.set(20, 12, "Starting system...")
+  os.sleep(2)
+  gpu.fill(1, 1, 50, 16, " ")
+end
+
+-------------------------------------
+-- POST
+-------------------------------------
+println("FixBIOS v4 POST Sequence")
 println("----------------------------------")
 
 local function postCheck(name, pass)
   println(("[%s] %s"):format(pass and " OK " or "FAIL", name))
-  if not pass then
-    computer.beep(400, 0.4)
-  end
+  if not pass then computer.beep(400, 0.4) end
 end
 
-local hasFS = component.isAvailable("filesystem")
-local hasEEPROM = component.isAvailable("eeprom")
-local hasGPU = component.isAvailable("gpu")
+local hasFS = safeIsAvailable("filesystem")
+local hasEEPROM = safeIsAvailable("eeprom")
+local hasGPU = safeIsAvailable("gpu")
 
 postCheck("Filesystem", hasFS)
 postCheck("EEPROM", hasEEPROM)
@@ -138,12 +158,13 @@ println("----------------------------------")
 -------------------------------------
 if not hasFS then
   println("❌ No filesystem detected.")
-  println("Insert disk with FixOS and reboot.")
+  println("Insert FixOS disk and reboot.")
   return
 end
 
 local fsAddr = component.list("filesystem")()
 local fs = component.proxy(fsAddr)
+local bootPaths = {"/boot/fixos.lua", "/init.lua", "/os/init.lua"}
 
 local function tryBoot()
   for _, path in ipairs(bootPaths) do
@@ -172,12 +193,10 @@ local function tryBoot()
 end
 
 if not tryBoot() then
-  println("⚠️  FixOS not found on disk!")
+  println("⚠️ FixOS not found on disk!")
   println("Please reinstall system.")
 end
 ]]
-
-
 
 eeprom.set(bios)
 eeprom.setLabel("FixBIOS")
