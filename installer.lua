@@ -1,106 +1,128 @@
---[[ 
-  FixBIOS v5 (Stable)
-  Created by Fixlut & GPT
-  🧠 Bootloader for FixOS
-]]
+-- FixOS Installer v5 (PRO SYSTEM EDITION)
+-- Author: Fixlut & GPT
+-- Compatible with OpenComputers
 
-local component = component
-local computer = computer
+local component = require("component")
+local computer = require("computer")
+local fs = require("filesystem")
+local term = require("term")
 
--- 🧩 Safe component list
-local function find(type)
-  for addr, name in component.list() do
-    if name == type then return component.proxy(addr) end
+---------------------------------------
+-- SETTINGS
+---------------------------------------
+local GITHUB_REPO = "https://raw.githubusercontent.com/FixlutGames21/FixOS/main/"
+local FILES = {
+  "boot/init.lua",
+  "boot/kernel.lua",
+  "boot/shell.lua",
+  "FixBIOS.lua",
+  "bin/calc.lua",
+  "bin/cls.lua",
+  "bin/echo.lua",
+  "bin/edit.lua",
+  "bin/ls.lua"
+}
+
+---------------------------------------
+-- FUNCTIONS
+---------------------------------------
+local function printc(t)
+  term.write("[FixOS Setup] " .. t .. "\n")
+end
+
+local function checkInternet()
+  if not component.isAvailable("internet") then
+    printc("❌ Немає інтернет-карти! Встановлення неможливе.")
+    return false
+  end
+  return true
+end
+
+local function checkDisk()
+  local addr = component.list("filesystem")()
+  if not addr then
+    printc("❌ Не знайдено файлової системи.")
+    return nil
+  end
+  local disk = component.proxy(addr)
+  printc("✅ Диск знайдено: " .. addr)
+  return disk
+end
+
+local function formatDisk(disk)
+  printc("🧹 Форматування диска...")
+  for file in disk.list("/") do
+    disk.remove(file)
   end
 end
 
-local gpu = find("gpu")
-local screen = find("screen")
-local fs = find("filesystem")
-
--- 🖥️ GPU Setup
-if gpu and screen then
-  pcall(function()
-    gpu.bind(screen)
-    gpu.setResolution(50, 16)
-    gpu.setBackground(0x000000)
-    gpu.setForeground(0x00FF00)
-    gpu.fill(1, 1, 50, 16, " ")
-    gpu.set(15, 3, "FixOS BIOS v5 Booting...")
-  end)
-end
-
-local function printLine(y, text)
-  if gpu then gpu.set(2, y, text) end
-end
-
--- 💡 POST
-local function post()
-  local line = 5
-  printLine(line, "Running POST checks...")
-  os.sleep(0.2)
-  local ok = true
-
-  if fs then
-    printLine(line + 1, "[ OK ] Filesystem detected")
-  else
-    printLine(line + 1, "[FAIL] No filesystem detected")
-    ok = false
+local function downloadFile(url, path)
+  local handle, reason = component.internet.request(url)
+  if not handle then
+    printc("❌ Неможливо завантажити: " .. reason)
+    return false
   end
 
-  if gpu then
-    printLine(line + 2, "[ OK ] GPU connected")
-  else
-    printLine(line + 2, "[WARN] No GPU found")
+  local data = ""
+  for chunk in handle do
+    data = data .. chunk
+  end
+  handle.close()
+
+  local dir = path:match("(.+)/[^/]+$")
+  if dir and not fs.exists(dir) then
+    fs.makeDirectory(dir)
   end
 
-  printLine(line + 3, "----------------------------------")
-  os.sleep(0.6)
-  return ok
+  local f = io.open(path, "w")
+  f:write(data)
+  f:close()
+  printc("✅ Завантажено: " .. path)
+  return true
 end
 
--- 🚀 Boot sequence
-local function boot()
-  if not fs then
-    printLine(10, "Insert disk with FixOS and reboot.")
+local function installFiles()
+  printc("⬇️ Завантаження файлів з GitHub...")
+  for _, path in ipairs(FILES) do
+    local url = GITHUB_REPO .. path
+    downloadFile(url, "/" .. path)
+  end
+end
+
+local function writeBIOS()
+  printc("⚙️ Встановлення FixBIOS v5 у EEPROM...")
+  local eeprom = component.proxy(component.list("eeprom")())
+  local file = io.open("/FixBIOS.lua", "r")
+  if not file then
+    printc("❌ Не знайдено FixBIOS.lua у корені.")
     return
   end
-
-  local paths = {
-    "/boot/init.lua",
-    "/init.lua",
-    "/os/init.lua"
-  }
-
-  for _, path in ipairs(paths) do
-    if fs.exists(path) then
-      printLine(10, "Booting: " .. path)
-      local f = fs.open(path, "r")
-      local data = ""
-      repeat
-        local chunk = fs.read(f, math.huge)
-        data = data .. (chunk or "")
-      until not chunk
-      fs.close(f)
-      local ok, result = load(data, "=" .. path)
-      if not ok then
-        printLine(12, "Boot error:")
-        printLine(13, tostring(result))
-        return
-      end
-      printLine(12, "Launching FixOS...")
-      os.sleep(0.5)
-      pcall(result)
-      return
-    end
-  end
-
-  printLine(10, "⚠️ No bootable FixOS found!")
+  local bios = file:read("*a")
+  file:close()
+  eeprom.set(bios)
+  eeprom.setLabel("FixBIOS v5")
+  printc("✅ BIOS встановлено успішно.")
 end
 
--- ⚙️ Main
-if post() then
-  boot()
-else
-  printLine(10, "BIOS halted. Insert system disk.")
-end
+---------------------------------------
+-- MAIN INSTALLER LOGIC
+---------------------------------------
+term.clear()
+printc("💿 Вітаємо у FixOS Installer v5!")
+os.sleep(1)
+
+if not checkInternet() then return end
+local disk = checkDisk()
+if not disk then return end
+
+os.sleep(0.5)
+formatDisk(disk)
+os.sleep(0.5)
+installFiles()
+os.sleep(0.5)
+writeBIOS()
+
+printc("🎉 Установка FixOS завершена!")
+printc("🔁 Перезавантаження через 3 секунди...")
+os.sleep(3)
+computer.shutdown(true)
