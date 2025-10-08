@@ -1,20 +1,21 @@
 -------------------------------------------------------
--- FixOS Installer PRO MAX
+-- FixOS Installer PRO MAX v2
 -- by Fixlut 💿
 -------------------------------------------------------
 local component = require("component")
-local computer = require("computer")
 local term = require("term")
 local fs = require("filesystem")
+local shell = require("shell")
 
 local gpu = component.isAvailable("gpu") and component.gpu or nil
-local internet = component.isAvailable("internet") and component.internet or nil
+local inet = component.isAvailable("internet") and component.internet or nil
 
 -------------------------------------------------------
--- UI helpers
+-- helpers
 -------------------------------------------------------
-local function printCentered(text)
-  local w, _ = gpu.getResolution()
+local function center(text)
+  if not gpu then print(text) return end
+  local w = ({gpu.getResolution()})[1]
   term.setCursor((w - #text) // 2, select(2, term.getCursor()))
   print(text)
 end
@@ -22,51 +23,47 @@ end
 local function banner()
   term.clear()
   print("====================================")
-  printCentered("🚀  FIXOS INSTALLER  PRO  MAX  🚀")
+  center("🚀  FIXOS INSTALLER  PRO  MAX v2  🚀")
   print("====================================")
   print()
 end
 
-local function progressBar(cur, total)
-  local percent = math.floor((cur / total) * 100)
-  local bar = string.rep("█", percent // 5) .. string.rep(" ", 20 - (percent // 5))
-  term.write(string.format("\r[%s] %d%%", bar, percent))
+local function bar(i, total)
+  local p = math.floor((i / total) * 100)
+  local filled = string.rep("█", p // 5)
+  local empty = string.rep(" ", 20 - (p // 5))
+  term.write(string.format("\r[%s%s] %d%%", filled, empty, p))
 end
 
 -------------------------------------------------------
--- Setup
+-- checks
 -------------------------------------------------------
 banner()
-print("Checking system components...")
+print("Checking components...\n")
 
-if not gpu then
-  io.stderr:write("❌ No GPU detected!\n")
+if not inet then
+  io.stderr:write("❌  Internet card not found!\n")
+  io.stderr:write("Insert card or use /disk/FixOS offline.\n")
   return
 end
 
-if not internet then
-  io.stderr:write("❌ No Internet Card detected!\n")
-  io.stderr:write("Insert card or use offline installer (/disk/FixOS)\n")
-  return
-end
-
-local function hasHTTP()
-  local ok, result = pcall(function()
-    local handle = internet.request("http://example.com")
-    if handle then handle.close() end
-    return true
-  end)
-  return ok and result
-end
-
-if not hasHTTP() then
-  print("⚠️  HTTP request failed, switching to proxy...")
-end
-
 -------------------------------------------------------
--- File list to download
+-- basic HTTP check
 -------------------------------------------------------
+local function netOK()
+  local ok, handle = pcall(inet.request, "http://example.com")
+  if ok and handle then handle.close() return true end
+  return false
+end
+
 local baseURL = "http://raw.githack.com/FixlutGames21/FixOS/main/"
+if not netOK() then
+  print("⚠️  Can't reach http://example.com, continuing anyway.")
+end
+
+-------------------------------------------------------
+-- files to pull
+-------------------------------------------------------
 local files = {
   "boot/init.lua",
   "boot/system.lua",
@@ -76,33 +73,46 @@ local files = {
 }
 
 -------------------------------------------------------
--- Download and install
+-- download
 -------------------------------------------------------
-print("\nInstalling FixOS...")
+print("Installing FixOS...\n")
 local total = #files
-
 for i, path in ipairs(files) do
   local url = baseURL .. path
-  local fullPath = "/" .. path
-  fs.makeDirectory(fs.path(fullPath))
+  local dest = "/" .. path
+  fs.makeDirectory(fs.path(dest))
 
-  local handle = internet.request(url)
-  local result = ""
-  if handle then
-    for chunk in handle do
-      result = result .. chunk
-    end
+  local content = ""
+  local ok, handle = pcall(inet.request, url)
+  if ok and handle then
+    for chunk in handle do content = content .. chunk end
     handle.close()
-    local f = io.open(fullPath, "w")
-    f:write(result)
-    f:close()
-  else
-    io.stderr:write("\n❌ Failed to download: " .. url .. "\n")
   end
 
-  progressBar(i, total)
-  os.sleep(0.1)
+  -- detect HTML garbage
+  if content:match("^%s*<") then
+    io.stderr:write("\n❌  HTML instead of Lua at: " .. path .. "\n")
+    io.stderr:write("Check your network or GitHub raw link.\n")
+    return
+  end
+
+  local f = io.open(dest, "w")
+  if f then f:write(content) f:close() end
+  bar(i, total)
+  os.sleep(0.05)
 end
 
-print("\n✅ Installation complete!")
-print("💾 You can now reboot and enjoy FixOS!")
+print("\n\n✅  FixOS installed successfully!")
+print("💾  You can reboot now and enjoy FixOS.\n")
+
+local choice
+repeat
+  io.write("Reboot now? (y/n): ")
+  choice = io.read()
+until choice == "y" or choice == "n"
+
+if choice == "y" then
+  print("Rebooting...")
+  os.sleep(1)
+  computer.shutdown(true)
+end
