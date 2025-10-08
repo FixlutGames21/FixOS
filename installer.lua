@@ -16,7 +16,7 @@ local function initGPU()
   if not gpu or not screen then return end
   pcall(function()
     gpu.bind(screen.address)
-    gpu.setResolution(50, 16)
+    gpu.setResolution(100, 50)
     gpu.setBackground(0x000000)
     gpu.setForeground(0x00FF00)
     gpu.fill(1, 1, 50, 16, " ")
