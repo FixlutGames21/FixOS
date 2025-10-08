@@ -1,216 +1,199 @@
--------------------------------------------------------
--- FixOS Installer PRO MAX v4 (with safe EEPROM flash)
--- by Fixlut 💿
--------------------------------------------------------
+---------------------------------------------
+-- 🧠 FixOS Installer v3 by Fixlut
+-- Автоматична установка FixOS + FixBIOS
+---------------------------------------------
 local component = require("component")
-local term = require("term")
-local fs = require("filesystem")
-local shell = require("shell")
 local computer = require("computer")
+local fs = require("filesystem")
+local term = require("term")
+local eeprom = component.eeprom
 
-local gpu = component.isAvailable("gpu") and component.gpu or nil
-local inet = component.isAvailable("internet") and component.internet or nil
+---------------------------------------------
+-- Вивід
+---------------------------------------------
+term.clear()
+print("=====================================")
+print("       FixOS INSTALLER PRO v3")
+print("=====================================")
+os.sleep(0.5)
+
+---------------------------------------------
+-- Крок 1: Встановлення FixOS
+---------------------------------------------
+local installPath = "/"
+print("\n📦 Installing FixOS...")
+
+-- створимо структуру директорій
+fs.makeDirectory(installPath .. "boot")
+fs.makeDirectory(installPath .. "system")
+
+-- створюємо головний файл FixOS
+local fixos = [[
+-------------------------------------
+-- FixOS Boot File (boot/fixos.lua)
+-------------------------------------
+print("🔧 Booting FixOS...")
+os.sleep(0.5)
+
+local fs = require("filesystem")
+local term = require("term")
+
+term.clear()
+print("=====================================")
+print("        Welcome to FixOS v2.0")
+print("=====================================")
+
+print("✅ System initialized successfully!")
+print("Tip: Type 'help' to see available commands.")
+
+while true do
+  io.write("FixOS> ")
+  local cmd = io.read()
+  if cmd == "exit" then
+    print("Goodbye!")
+    break
+  elseif cmd == "help" then
+    print("Available commands: help, exit, about")
+  elseif cmd == "about" then
+    print("FixOS v2.0 by Fixlut")
+  else
+    print("Unknown command: " .. tostring(cmd))
+  end
+end
+]]
+
+local bootFile = io.open(installPath .. "boot/fixos.lua", "w")
+bootFile:write(fixos)
+bootFile:close()
+
+print("✅ FixOS files installed successfully!")
+
+---------------------------------------------
+-- Крок 2: Запис FixBIOS в EEPROM
+---------------------------------------------
+print("\n⚙️  Writing FixBIOS to EEPROM...")
+
+local bios = [[
+-------------------------------------
+-- FixBIOS v3 (POST Boot System)
+-- Created by Fixlut
+-------------------------------------
+local component = component
+local computer = computer
+local unicode = unicode
+
+-- Boot sequence paths
+local bootPaths = {
+  "/boot/fixos.lua",
+  "/init.lua",
+  "/os/init.lua"
+}
+
+-- GPU init
+local gpu, screen = component.list("gpu")(), component.list("screen")()
+if gpu and screen then
+  gpu = component.proxy(gpu)
+  gpu.bind(screen)
+  gpu.setResolution(50, 16)
+  gpu.setForeground(0x00FF00)
+  gpu.setBackground(0x000000)
+  gpu.fill(1, 1, 50, 16, " ")
+else
+  gpu = nil
+end
+
+-- Print text safely
+local line = 1
+local function println(text)
+  if gpu then
+    gpu.set(2, line, text)
+    line = line + 1
+  end
+end
+
+-------------------------------------
+-- POST (Power-On Self Test)
+-------------------------------------
+println("FixBIOS v3.0 initializing...")
+println("----------------------------------")
+
+local function postCheck(name, pass)
+  println(("[%s] %s"):format(pass and " OK " or "FAIL", name))
+  if not pass then
+    computer.beep(400, 0.4)
+  end
+end
+
+local hasFS = component.isAvailable("filesystem")
 local hasEEPROM = component.isAvailable("eeprom")
+local hasGPU = component.isAvailable("gpu")
 
--- UI helpers
-local function center(text)
-  if not gpu then print(text) return end
-  local w = ({gpu.getResolution()})[1]
-  term.setCursor(math.max(1, (w - #text) // 2), select(2, term.getCursor()))
-  print(text)
+postCheck("Filesystem", hasFS)
+postCheck("EEPROM", hasEEPROM)
+postCheck("GPU", hasGPU)
+println("----------------------------------")
+
+-------------------------------------
+-- Bootloader
+-------------------------------------
+if not hasFS then
+  println("❌ No filesystem detected.")
+  println("Insert disk with FixOS and reboot.")
+  return
 end
 
-local function banner()
-  term.clear()
-  print("====================================")
-  center("🚀  FIXOS INSTALLER  PRO  MAX v4  🚀")
-  print("====================================")
-  print()
-end
+local fsAddr = component.list("filesystem")()
+local fs = component.proxy(fsAddr)
 
-local function bar(i, total)
-  local p = math.floor((i / total) * 100)
-  local filled = string.rep("█", p // 5)
-  local empty = string.rep(" ", 20 - (p // 5))
-  term.write(string.format("\r[%s%s] %d%%", filled, empty, p))
-end
+local function tryBoot()
+  for _, path in ipairs(bootPaths) do
+    if fs.exists(path) then
+      println("Booting: " .. path)
+      local handle = fs.open(path, "r")
+      local data = ""
+      repeat
+        local chunk = fs.read(handle, math.huge)
+        data = data .. (chunk or "")
+      until not chunk
+      fs.close(handle)
 
--- Start
-banner()
-print("Checking components...\n")
+      local ok, err = load(data, "="..path)
+      if not ok then
+        println("Boot error: " .. tostring(err))
+        return false
+      end
 
-if not inet then
-  io.stderr:write("❗ Warning: Internet card not found or disabled. Installer will try local fallback.\n")
-end
-
--- Basic net test (best effort)
-local function netOK()
-  if not inet then return false end
-  local ok, handle = pcall(inet.request, "http://example.com")
-  if ok and handle then handle.close() return true end
+      println("Running FixOS...")
+      ok()
+      return true
+    end
+  end
   return false
 end
 
-if not netOK() then
-  print("⚠️  HTTP test failed — continuing with fallback options.")
+if not tryBoot() then
+  println("⚠️  FixOS not found on disk!")
+  println("Please reinstall system.")
 end
+]]
 
--- Files we want to pull (add/remove as needed)
-local baseURL = "http://raw.githack.com/FixlutGames21/FixOS/main/"
-local files = {
-  "boot/init.lua",
-  "boot/system.lua",
-  "bin/shell.lua",
-  "bin/ls.lua",
-  "bin/edit.lua"
-}
 
--- Download/install files
-print("Installing FixOS...\n")
-local total = #files
-for i, path in ipairs(files) do
-  local url = baseURL .. path
-  local dest = "/" .. path
-  fs.makeDirectory(fs.path(dest))
 
-  local content = nil
-  if netOK() then
-    local ok, handle = pcall(inet.request, url)
-    if ok and handle then
-      content = ""
-      for chunk in handle do content = content .. chunk end
-      handle.close()
-    end
-  end
+eeprom.set(bios)
+eeprom.setLabel("FixBIOS")
+print("✅ FixBIOS successfully written to EEPROM!")
 
-  -- fallback: local disk
-  if (not content or content == "") and fs.exists("/disk/FixOS/" .. path) then
-    local f = io.open("/disk/FixOS/" .. path, "r")
-    content = f:read("*a")
-    f:close()
-  end
-
-  if not content or content:match("^%s*<") then
-    io.stderr:write("\n❌  Failed to obtain valid Lua for: " .. path .. "\n")
-    io.stderr:write("   Check network or put files in /disk/FixOS/\n")
-    return
-  end
-
-  local f = io.open(dest, "w")
-  if f then f:write(content) f:close() end
-  bar(i, total)
-  os.sleep(0.05)
-end
-
-print("\n\n✅  FixOS files installed successfully!")
-
--- Create autorun
-print("💾  Creating /autorun.lua ...")
-local autorun = io.open("/autorun.lua", "w")
-autorun:write([[
-term.clear()
-print("====================================")
-print("        🪟 Welcome to FixOS 🪟       ")
-print("====================================")
-os.sleep(1)
-shell.execute("/bin/shell.lua")
-]])
-autorun:close()
-print("💾  autorun created.")
-
--- EEPROM flash routine (optional, safe)
-if hasEEPROM then
-  print("\n🛡️  EEPROM detected. You can optionally flash a custom BIOS (WARNING: risky).")
-  io.write("Do you want to flash EEPROM with FixOS BIOS image? (y/n): ")
-  local ans = io.read()
-  if ans == "y" then
-    -- BACKUP current EEPROM
-    local ok, current = pcall(function()
-      return component.eeprom.get()
-    end)
-    if not ok then
-      io.stderr:write("❌  Cannot read EEPROM for backup. Aborting flash.\n")
-    else
-      -- save backup
-      local bfile = "/eeprom_backup.lua"
-      local bf = io.open(bfile, "w")
-      if bf then
-        bf:write(current)
-        bf:close()
-        print("🔒  EEPROM backup saved to: " .. bfile)
-      else
-        io.stderr:write("❌  Failed to write EEPROM backup file. Aborting.\n")
-      end
-
-      -- Obtain new EEPROM image (try network then local)
-      local eepromData = nil
-      local eurl = baseURL .. "eeprom.img"
-      if netOK() then
-        local ok2, handle = pcall(inet.request, eurl)
-        if ok2 and handle then
-          eepromData = ""
-          for chunk in handle do eepromData = eepromData .. chunk end
-          handle.close()
-        end
-      end
-      if (not eepromData or eepromData == "") and fs.exists("/disk/FixOS/eeprom.img") then
-        local ef = io.open("/disk/FixOS/eeprom.img","r")
-        eepromData = ef:read("*a")
-        ef:close()
-      end
-
-      if not eepromData or eepromData:match("^%s*<") then
-        io.stderr:write("❌  Cannot obtain valid EEPROM image. Aborting flash.\n")
-      else
-        print("\n!!! VERY IMPORTANT !!!")
-        print("Writing to EEPROM will overwrite current BIOS. This may prevent booting.")
-        print("If you want to proceed, type exactly: FORMAT EEPROM")
-        io.write("> ")
-        local confirm = io.read()
-        if confirm == "FORMAT EEPROM" then
-          -- attempt write
-          local ok3, err = pcall(function() component.eeprom.set(eepromData) end)
-          if ok3 then
-            print("✅  EEPROM flashed successfully.")
-            -- create restore helper
-            local restore = io.open("/eeprom_restore.lua","w")
-            restore:write([[
-local component = require("component")
-local f = io.open("/eeprom_backup.lua","r")
-if not f then print("No backup found") return end
-local data = f:read("*a")
-f:close()
-component.eeprom.set(data)
-print("EEPROM restored from /eeprom_backup.lua")
-]])
-            restore:close()
-            print("🔁  Created /eeprom_restore.lua to restore backup if needed.")
-          else
-            io.stderr:write("❌  EEPROM write failed: " .. tostring(err) .. "\n")
-            io.stderr:write("You can restore backup with /eeprom_restore.lua (if exists) manually.\n")
-          end
-        else
-          print("Aborted EEPROM flash.")
-        end
-      end
-    end
-  else
-    print("Skipped EEPROM flash.")
-  end
-else
-  print("\nℹ️  No EEPROM component detected; skipping EEPROM section.")
-end
-
--- Final prompt
-print("\nAll done. Reboot recommended.")
-local choice
-repeat
-  io.write("Reboot now? (y/n): ")
-  choice = io.read()
-until choice == "y" or choice == "n"
-
-if choice == "y" then
-  print("Rebooting...")
+---------------------------------------------
+-- Крок 3: Завершення
+---------------------------------------------
+print("\n🎉 Installation completed!")
+print("You can reboot now and enjoy FixOS.")
+io.write("\nReboot now? (y/n): ")
+local ans = io.read()
+if ans and ans:lower() == "y" then
+  print("🔁 Rebooting...")
   os.sleep(1)
   computer.shutdown(true)
+else
+  print("🚫 Reboot canceled.")
 end
