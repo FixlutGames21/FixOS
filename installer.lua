@@ -129,7 +129,7 @@ if gpu then
   gpu.setForeground(0xFFFFFF)
   gpu.set(18, 10, "FixOS BIOS v4 — Deluxe Edition")
   gpu.set(20, 12, "Starting system...")
-  os.sleep(2)
+  computer.sleep(2)
   gpu.fill(1, 1, 50, 16, " ")
 end
 
