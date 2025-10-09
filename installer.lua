@@ -1,21 +1,19 @@
 -- installer.lua
--- FixOS Installer PRO (stable) — vFinal
--- by Fixlut & GPT (adapted)
+-- FixOS PRO Installer (stable, safe)
+-- by Fixlut & GPT (final)
 
--- safe requires / globals fallback
+-- safe require fallback (works inside OpenOS shell)
 local ok, component = pcall(require, "component"); if not ok then component = _G.component end
 local ok2, computer = pcall(require, "computer"); if not ok2 then computer = _G.computer end
 local ok3, fs_api = pcall(require, "filesystem"); if not ok3 then fs_api = _G.filesystem end
 local ok4, term = pcall(require, "term"); if not ok4 then term = _G.term end
+local unicode = _G.unicode
 
-local unicode = unicode -- available globally in OC
-local haveInternet = component and component.isAvailable and component.isAvailable("internet")
-local haveEEPROM   = component and component.isAvailable and component.isAvailable("eeprom")
-local haveGPU      = component and component.isAvailable and component.isAvailable("gpu")
-local haveScreen   = component and component.isAvailable and component.isAvailable("screen")
-
--- CONFIG
-local GITHUB_RAW_BASE = "https://raw.githubusercontent.com/FixlutGames21/FixOS/main/"
+-- config
+local GITHUB_RAW_BASES = {
+  "https://raw.githubusercontent.com/FixlutGames21/FixOS/main/",
+  "http://raw.githack.com/FixlutGames21/FixOS/main/"
+}
 local FILES = {
   "boot/init.lua",
   "boot/kernel.lua",
@@ -28,38 +26,34 @@ local FILES = {
   "FixBIOS.lua"
 }
 
--- helpers
-local function printf(fmt, ...) term.write(string.format(fmt, ...) .. "\n") end
-local function pause(s) if s then os.sleep(s) else os.sleep(0.05) end end
+local function printf(s, ...) term.write(string.format(s, ...) .. "\n") end
+local function pause(t) if t then os.sleep(t) else os.sleep(0.05) end end
 
--- try to get proxies
-local function getProxy(kind)
-  local addr = component.list(kind)()
-  if not addr then return nil end
-  return component.proxy(addr)
+-- proxies
+local function getFirstProxy(kind)
+  for addr in component.list(kind) do
+    return component.proxy(addr)
+  end
+  return nil
 end
 
-local eepromProxy = getProxy("eeprom")
-local gpuProxy    = getProxy("gpu")
-local screenAddr  = component.list("screen")() -- address only for bind
+local eepromProxy = getFirstProxy("eeprom")
+local gpuProxy    = getFirstProxy("gpu")
+local screenAddr  = (component.list("screen")()) -- address or nil
 
--- attempt set resolution 100x50 safely
-local function safeSetResolution(resW, resH)
-  if not gpuProxy or not screenAddr then return false end
+-- safe resolution attempt (100x50)
+local function safeSetResolution(w,h)
+  if not gpuProxy or not screenAddr then return end
   pcall(function()
     gpuProxy.bind(screenAddr, true)
-    -- only try if supported
-    local ok, w, h = pcall(gpuProxy.getResolution, gpuProxy)
-    if ok and w and h then
-      -- try to set 100x50; if unsupported, pcall will fail quietly
-      pcall(gpuProxy.setResolution, gpuProxy, resW, resH)
+    local ok, curW, curH = pcall(gpuProxy.getResolution, gpuProxy)
+    if ok and curW and curH then
+      pcall(gpuProxy.setResolution, gpuProxy, w, h)
     end
   end)
-  return true
 end
 
--- UI helpers (center using unicode length)
-local function drawCenteredLine(y, text, color)
+local function centerPrint(y, text, color)
   if not gpuProxy then return end
   local ok, w = pcall(gpuProxy.getResolution, gpuProxy)
   if not ok or not w then return end
@@ -78,41 +72,58 @@ local function clearScreen()
   end
 end
 
--- fetch remote (internet) safe
+-- fetch remote with several bases, safe and returns STRING or nil+err
 local function fetch_remote(path)
-  if not haveInternet then return nil, "no internet component" end
-  local url = GITHUB_RAW_BASE .. path
-  local ok,handle_or_err = pcall(component.internet.request, component, url)
-  if not ok or not handle_or_err then return nil, tostring(handle_or_err) end
-  local data = ""
-  for chunk in handle_or_err do data = data .. chunk end
-  if handle_or_err.close then pcall(handle_or_err.close, handle_or_err) end
-  if data:match("^%s*<") then return nil, "got HTML (raw URL problem)" end
-  return data, nil
+  if not (component and component.isAvailable and component.isAvailable("internet")) then
+    return nil, "no internet"
+  end
+  for _, base in ipairs(GITHUB_RAW_BASES) do
+    local url = base .. path
+    local ok, handle_or_err = pcall(component.internet.request, component, url)
+    if ok and handle_or_err then
+      local data = ""
+      for chunk in handle_or_err do
+        data = data .. chunk
+      end
+      if handle_or_err.close then pcall(handle_or_err.close, handle_or_err) end
+      if type(data) == "string" and not data:match("^%s*<") then
+        return data
+      end
+    end
+  end
+  return nil, "remote failed"
 end
 
--- fetch local fallback /disk/FixOS/<path>
+-- local fallback from /disk/FixOS/
 local function fetch_local(path)
   local localPath = "/disk/FixOS/" .. path
   if fs_api.exists(localPath) then
     local f = io.open(localPath, "r")
-    if not f then return nil, "cannot open local file" end
-    local c = f:read("*a"); f:close()
-    return c, nil
+    if not f then return nil, "cannot open local" end
+    local content = f:read("*a"); f:close()
+    return content
   end
-  return nil, "no local file"
+  return nil, "no local"
 end
 
+-- universal fetch, ensures result is string
 local function fetch_with_fallback(path)
   local data, err = fetch_remote(path)
-  if data then return data end
+  if data then
+    if type(data) ~= "string" then return nil, "remote returned not string" end
+    return data
+  end
   local d2, e2 = fetch_local(path)
-  if d2 then return d2 end
+  if d2 then
+    if type(d2) ~= "string" then return nil, "local returned not string" end
+    return d2
+  end
   return nil, (err or "") .. "; " .. (e2 or "")
 end
 
--- write file to root fs (via Lua io - this installer runs in OpenOS)
+-- write file to root filesystem (OpenOS style)
 local function write_file(dest, content)
+  if type(content) ~= "string" then return false, "content is not string" end
   local dir = dest:match("(.+)/[^/]+$")
   if dir and not fs_api.exists(dir) then fs_api.makeDirectory(dir) end
   local f, ferr = io.open(dest, "w")
@@ -121,7 +132,7 @@ local function write_file(dest, content)
   return true
 end
 
--- recursive delete for component proxy filesystem
+-- remove recursive on proxy filesystem (proxy.list returns table)
 local function proxy_remove_recursive(proxy, path)
   local list = proxy.list(path)
   for name,_ in pairs(list) do
@@ -135,7 +146,7 @@ local function proxy_remove_recursive(proxy, path)
   end
 end
 
-local function format_target_proxy(proxy)
+local function format_target(proxy)
   printf("Formatting target filesystem (safe)...")
   local root = "/"
   local list = proxy.list(root)
@@ -148,155 +159,135 @@ local function format_target_proxy(proxy)
       pcall(proxy.remove, proxy, p)
     end
   end
-  printf("Done.")
+  printf("Format done.")
 end
 
--- Build FixBIOS vPro2 (embedded) with resolution 100x50
-local FIXBIOS_VPRO2 = [[
--- FixBIOS vPro2 (embedded) — resolution 100x50
+-- embedded FixBIOS (improved, safe)
+local FIXBIOS = [[
+-- FixBIOS (stable, safe)
 local component = component
 local computer = computer
 local unicode = unicode
 
 local function findProxy(kind)
-  for a,t in component.list() do if t==kind then return component.proxy(a) end end
+  for addr, t in component.list() do
+    if t == kind then return component.proxy(addr) end
+  end
   return nil
 end
 
 local gpu = findProxy("gpu")
 local screen = findProxy("screen")
 local eeprom = findProxy("eeprom")
-
 if gpu and screen then
   pcall(function()
     gpu.bind(screen.address)
     pcall(gpu.setResolution, gpu, 100, 50)
     pcall(gpu.setBackground, gpu, 0x000000)
     pcall(gpu.setForeground, gpu, 0x00FF00)
-    pcall(gpu.fill, gpu, 1, 1, 100, 50, " ")
-    pcall(gpu.set, gpu, 30, 6, "███████╗██╗██╗  ██╗ ██████╗ ███████╗")
-    pcall(gpu.set, gpu, 30, 7, "██╔════╝██║██║ ██╔╝██╔═══██╗██╔════╝")
-    pcall(gpu.set, gpu, 30, 8, "███████╗██║█████╔╝ ██║   ██║█████╗  ")
-    pcall(gpu.set, gpu, 30, 9, "╚════██║██║██╔═██╗ ██║   ██║██╔══╝  ")
-    pcall(gpu.set, gpu, 30,10, "███████║██║██║  ██╗╚██████╔╝██║     ")
-    pcall(gpu.set, gpu, 30,11, "╚══════╝╚═╝╚═╝  ╚═╝ ╚═════╝ ╚═╝     ")
-    pcall(gpu.set, gpu, 44,14, "FixBIOS vPro2 — Booting")
+    pcall(gpu.fill, gpu, 1,1,100,50," ")
+    pcall(gpu.set, gpu, 36, 6, "███████╗██╗██╗  ██╗ ██████╗ ███████╗")
+    pcall(gpu.set, gpu, 36, 7, "██╔════╝██║██║ ██╔╝██╔═══██╗██╔════╝")
+    pcall(gpu.set, gpu, 36, 8, "███████╗██║█████╔╝ ██║   ██║█████╗  ")
+    pcall(gpu.set, gpu, 36, 9, "╚════██║██║██╔═██╗ ██║   ██║██╔══╝  ")
+    pcall(gpu.set, gpu, 36,10, "███████║██║██║  ██╗╚██████╔╝██║     ")
+    pcall(gpu.set, gpu, 36,11, "╚══════╝╚═╝╚═╝  ╚═╝ ╚═════╝ ╚═╝     ")
+    pcall(gpu.set, gpu, 48,14, "FixBIOS — Stable")
   end)
 end
 
-local function clearScreen()
-  if gpu then pcall(gpu.fill, gpu, 1,1,100,50," ") end
-end
-
-local function showMessage(y, str, color)
+local function show(y, txt, color)
   if not gpu then return end
-  local ok, w = pcall(gpu.getResolution, gpu)
+  local ok,w = pcall(gpu.getResolution, gpu)
   if not ok or not w then return end
-  local len = unicode and unicode.len(str) or #str
+  local len = unicode and unicode.len(txt) or #txt
   local x = math.floor(w/2 - len/2)
   pcall(gpu.setForeground, gpu, color or 0x00FF00)
-  pcall(gpu.set, gpu, x, y, str)
-end
-
-local function readAll(handle)
-  local s = ""
-  while true do
-    local chunk = fs.read(handle, 65536)
-    if not chunk or chunk == "" then break end
-    s = s .. chunk
-  end
-  return s
+  pcall(gpu.set, gpu, x, y, txt)
 end
 
 local fs = findProxy("filesystem")
 if not fs then
-  showMessage(10, "No filesystem found. Insert disk & reboot", 0xFF0000)
+  show(12, "No filesystem found. Insert system disk & reboot.", 0xFF0000)
   return
 end
 
 local bootPaths = {"/boot/init.lua", "/boot/kernel.lua", "/init.lua"}
 for _, p in ipairs(bootPaths) do
   if fs.exists(p) then
-    showMessage(10, "Found: "..p.." — loading...", 0x00FF00)
+    show(12, "Found: "..p.." — loading...", 0x00FF00)
     local h = fs.open(p, "r")
-    if h then
-      local data = ""
-      repeat
-        local chunk = fs.read(h, 65536)
-        data = data .. (chunk or "")
-      until not chunk
-      fs.close(h)
-      local ok, chunkOrErr = load(data, "="..p)
-      if not ok then
-        showMessage(12, "Boot load error: "..tostring(chunkOrErr), 0xFF5555)
-        return
-      end
-      pcall(chunkOrErr)
+    if not h then show(14, "Cannot open file: "..p, 0xFF5555); return end
+    local data = ""
+    repeat
+      local chunk = fs.read(h, 65536)
+      data = data .. (chunk or "")
+    until not chunk
+    fs.close(h)
+    local ok, chunkOrErr = load(data, "="..p)
+    if not ok then
+      show(14, "Load error: "..tostring(chunkOrErr), 0xFF5555)
       return
     end
+    local succ, err = pcall(chunkOrErr)
+    if not succ then show(14, "Runtime error: "..tostring(err), 0xFF5555) end
+    return
   end
 end
 
-showMessage(10, "No bootable FixOS found. Install & reboot.", 0xFF0000)
+show(12, "No bootable FixOS found on disk.", 0xFF0000)
 ]]
 
--- main
+-- start installer UI
 clearScreen()
-safeSetResolution(100, 50)
+safeSetResolution(100,50)
 clearScreen()
-drawCenteredLine(3, "FixOS Installer PRO", 0x00FF00)
-drawCenteredLine(5, "Resolution set: 100x50 (if supported)", 0xAAAAAA)
-
--- ask BIOS variant
+centerPrint(3, "FixOS PRO Installer", 0x00FF00)
+centerPrint(5, "Resolution: 100x50 (if supported)", 0xAAAAAA)
 print()
-term.write("Choose BIOS variant to install (lite/pro/debug). Type and Enter: ")
-local choice = io.read()
-choice = (choice or ""):lower()
+term.write("Choose BIOS variant (lite / pro / debug), then Enter: ")
+local variant = (io.read() or "pro"):lower()
 
--- find target filesystem proxy (use computer.getBootAddress() if valid, else first fs)
-local targetAddr = computer.getBootAddress()
+-- pick target filesystem proxy (first found)
 local targetProxy = nil
+local targetAddr = computer.getBootAddress()
+-- try boot address first
 if targetAddr then
-  local okp, p = pcall(component.proxy, component.list("filesystem")())
-  -- ignore; we will search proxies below
+  for addr in component.list("filesystem") do
+    if addr == targetAddr then targetProxy = component.proxy(addr); break end
+  end
 end
-
--- pick first filesystem proxy
-for addr in component.list("filesystem") do
-  targetProxy = component.proxy(addr)
-  break
-end
-
+-- else first filesystem
 if not targetProxy then
-  printf("No filesystem device detected. Insert disk and retry.")
-  return
+  for addr in component.list("filesystem") do
+    targetProxy = component.proxy(addr)
+    break
+  end
 end
+if not targetProxy then printf("No filesystem found. Insert disk and retry."); return end
 
--- confirm erase
+-- confirm destructive action
 print()
-term.write("WARNING: Installer will ERASE root of the target disk. Type EXACT to confirm: ERASE AND INSTALL\n> ")
+term.write("WARNING: This will ERASE root of target disk. Type EXACT: ERASE AND INSTALL\n> ")
 local confirm = io.read()
-if confirm ~= "ERASE AND INSTALL" then
-  printf("Aborted by user.")
-  return
-end
+if confirm ~= "ERASE AND INSTALL" then printf("Aborted."); return end
 
--- format target (via proxy)
-format_target_proxy(targetProxy)
+-- format target
+format_target(targetProxy)
 
--- install files (fetch remote or local)
+-- download/install files
 printf("Installing files...")
 for _, rel in ipairs(FILES) do
   printf("-> %s", rel)
-  local content, err = fetch_with_fallback(rel)
+  local content, ferr = fetch_with_fallback(rel)
   if not content then
-    printf("Failed to obtain %s: %s", rel, tostring(err))
-    printf("Aborting install.")
+    printf("Failed to obtain %s : %s", rel, tostring(ferr))
+    printf("Aborting.")
     return
   end
   local okw, werr = write_file("/" .. rel, content)
   if not okw then
-    printf("Write failed for /%s : %s", rel, tostring(werr))
+    printf("Failed to write /%s : %s", rel, tostring(werr))
     return
   end
 end
@@ -313,66 +304,51 @@ if s then pcall(s) end
 ]]
 write_file("/autorun.lua", autorun)
 
--- EEPROM backup & write chosen BIOS
+-- EEPROM backup + write
 if not eepromProxy then
   printf("No EEPROM found; skipping BIOS write. Install finished.")
   term.write("Reboot now? (y/n): ")
-  local r = io.read()
-  if r == "y" then computer.shutdown(true) end
+  if (io.read() or ""):lower():sub(1,1) == "y" then computer.shutdown(true) end
   return
 end
 
--- backup current
+-- backup
 local okb, cur = pcall(function() return eepromProxy.get() end)
-if okb and cur then
-  local bf = io.open("/eeprom_backup.lua", "w")
+if okb and cur and cur ~= "" then
+  local bf = io.open("/eeprom_backup.lua","w")
   if bf then bf:write(cur); bf:close(); printf("EEPROM backup saved -> /eeprom_backup.lua") end
 end
 
--- determine bios content to write
+-- build chosen BIOS content
 local biosContent = nil
-local file_bios_local, errb = fetch_with_fallback("FixBIOS.lua")
-if file_bios_local then biosContent = file_bios_local end
+local localBIOS, berr = fetch_with_fallback("FixBIOS.lua")
+if localBIOS and type(localBIOS) == "string" then biosContent = localBIOS end
 
 if not biosContent then
-  -- pick variant based on user's choice; use embedded FIXBIOS_VPRO2 for pro/default
-  if choice == "lite" then
-    biosContent = "-- auto-generated BIOS lite\\n" .. "local component = component\\nfor a,t in component.list('filesystem') do local p=component.proxy(a) if p.exists('/boot/init.lua') then local h=p.open('/boot/init.lua','r') local s='' repeat local c = p.read(h, 65536) s=s..(c or '') until not c p.close(h) local f,err = load(s, '=init') if f then pcall(f) end return end end\\n"
-  elseif choice == "debug" then
-    biosContent = "-- debug BIOS\\nlocal component=require('component') print('Debug BIOS') for a,t in component.list('filesystem') do print(a,t) end"
+  if variant == "lite" then
+    biosContent = "-- FixBIOS LITE\\n" .. "local component = component\\nfor a,t in component.list('filesystem') do local p=component.proxy(a) if p.exists('/boot/init.lua') then local h = p.open('/boot/init.lua','r'); local s=''; repeat local c=p.read(h,65536) s=s..(c or '') until not c; p.close(h); local f=load(s,'=init'); if f then pcall(f) end; return end end"
+  elseif variant == "debug" then
+    biosContent = "-- FixBIOS DEBUG\\nlocal component=require('component') print('FS:'); for a,t in component.list('filesystem') do print(a,t) end"
   else
-    biosContent = FIXBIOS_VPRO2
+    biosContent = FIXBIOS
   end
 end
 
--- sanity
-if biosContent:match("^%s*<") then
-  printf("ERROR: BIOS looks like HTML. Aborting BIOS write.")
-  return
-end
+if type(biosContent) ~= "string" then printf("Bad BIOS content type"); return end
+if biosContent:match("^%s*<") then printf("BIOS looks like HTML. Aborting."); return end
 
--- confirm BIOS write
 print()
-term.write("Type EXACTLY WRITE BIOS to write new EEPROM, or press Enter to skip: ")
+term.write("Type EXACTLY: WRITE BIOS  to write new EEPROM, or press Enter to skip: ")
 local wb = io.read()
-if wb ~= "WRITE BIOS" then
-  printf("Skipped BIOS write. Install finished.")
-  term.write("Reboot now? (y/n): ")
-  local rr = io.read()
-  if rr == "y" then computer.shutdown(true) end
-  return
-end
+if wb ~= "WRITE BIOS" then printf("Skipped BIOS write. Install finished."); term.write("Reboot now? (y/n): "); if (io.read() or ""):lower():sub(1,1) == "y" then computer.shutdown(true) end; return end
 
--- write & label
-local okw, werr = pcall(function() eepromProxy.set(biosContent) end)
-if not okw then
-  printf("Failed to write EEPROM: %s", tostring(werr))
-  return
-end
-pcall(eepromProxy.setLabel, "FixBIOS vPro2")
-pcall(eepromProxy.setData, tostring(component.list("filesystem")())) -- best-effort
+local succ, serr = pcall(function() eepromProxy.set(biosContent) end)
+if not succ then printf("EEPROM write failed: %s", tostring(serr)); return end
+pcall(eepromProxy.setLabel, "FixBIOS Stable")
+-- try to set boot address to target filesystem (best-effort)
+pcall(function() eepromProxy.setData(component.list("filesystem")() or "") end)
 
 printf("EEPROM flashed. Install complete.")
 term.write("Reboot now? (y/n): ")
 local rr = io.read()
-if rr == "y" then computer.shutdown(true) end
+if rr and rr:lower():sub(1,1) == "y" then computer.shutdown(true) end

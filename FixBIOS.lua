@@ -1,7 +1,7 @@
--- FixBIOS vPro2 (stable for FixOS)
--- by Fixlut & GPT
+-- FixBIOS (stable, safe)
 local component = component
 local computer = computer
+local unicode = unicode
 
 local function findProxy(kind)
   for addr, t in component.list() do
@@ -13,83 +13,60 @@ end
 local gpu = findProxy("gpu")
 local screen = findProxy("screen")
 local eeprom = findProxy("eeprom")
-
-local function drawTextCentered(y, color, text)
-  if not gpu then return end
-  local w, h = gpu.getResolution()
-  local x = math.floor(w/2 - #text/2)
-  gpu.setForeground(color)
-  gpu.set(x, y, text)
-end
-
-local function clearScreen()
-  if gpu then
-    local w, h = gpu.getResolution()
-    gpu.setBackground(0x000000)
-    gpu.fill(1, 1, w, h, " ")
-  end
-end
-
-local function showStatus(msg, color)
-  clearScreen()
-  drawTextCentered(2, 0x00FF00, "FixBIOS vPro2")
-  drawTextCentered(4, color or 0xAAAAAA, msg)
-end
-
-local function tryBoot(proxy)
-  if not proxy then return false end
-  local bootPaths = {"/boot/init.lua", "/boot/kernel.lua", "/boot/shell.lua", "/init.lua"}
-  for _, path in ipairs(bootPaths) do
-    if proxy.exists(path) then
-      showStatus("Booting " .. path .. "...", 0x00FF00)
-      local handle = proxy.open(path, "r")
-      if not handle then return false end
-      local data = ""
-      repeat
-        local chunk = proxy.read(handle, math.huge)
-        data = data .. (chunk or "")
-      until not chunk
-      proxy.close(handle)
-      local ok, err = load(data, "="..path)
-      if not ok then
-        showStatus("Error loading " .. path .. ":\n" .. tostring(err), 0xFF5555)
-        return false
-      end
-      local ok2, err2 = pcall(ok)
-      if not ok2 then
-        showStatus("Runtime error: " .. tostring(err2), 0xFF5555)
-        return false
-      end
-      return true
-    end
-  end
-  return false
-end
-
-local function bootSystem()
-  local addr = eeprom and eeprom.getData() or nil
-  local bootProxy = addr and component.proxy(addr)
-  if bootProxy and tryBoot(bootProxy) then return end
-
-  -- fallback: try all
-  for address in component.list("filesystem") do
-    local proxy = component.proxy(address)
-    if tryBoot(proxy) then
-      if eeprom then eeprom.setData(address) end
-      return
-    end
-  end
-
-  showStatus("No bootable FixOS found.\nInsert disk & reboot.", 0xFF0000)
-end
-
--- init GPU
 if gpu and screen then
   pcall(function()
     gpu.bind(screen.address)
-    gpu.setResolution(50, 16)
+    pcall(gpu.setResolution, gpu, 100, 50)
+    pcall(gpu.setBackground, gpu, 0x000000)
+    pcall(gpu.setForeground, gpu, 0x00FF00)
+    pcall(gpu.fill, gpu, 1,1,100,50," ")
+    pcall(gpu.set, gpu, 36, 6, "███████╗██╗██╗  ██╗ ██████╗ ███████╗")
+    pcall(gpu.set, gpu, 36, 7, "██╔════╝██║██║ ██╔╝██╔═══██╗██╔════╝")
+    pcall(gpu.set, gpu, 36, 8, "███████╗██║█████╔╝ ██║   ██║█████╗  ")
+    pcall(gpu.set, gpu, 36, 9, "╚════██║██║██╔═██╗ ██║   ██║██╔══╝  ")
+    pcall(gpu.set, gpu, 36,10, "███████║██║██║  ██╗╚██████╔╝██║     ")
+    pcall(gpu.set, gpu, 36,11, "╚══════╝╚═╝╚═╝  ╚═╝ ╚═════╝ ╚═╝     ")
+    pcall(gpu.set, gpu, 48,14, "FixBIOS — Stable")
   end)
 end
 
-showStatus("FixBIOS initializing...", 0xAAAAAA)
-bootSystem()
+local function show(y, txt, color)
+  if not gpu then return end
+  local ok,w = pcall(gpu.getResolution, gpu)
+  if not ok or not w then return end
+  local len = unicode and unicode.len(txt) or #txt
+  local x = math.floor(w/2 - len/2)
+  pcall(gpu.setForeground, gpu, color or 0x00FF00)
+  pcall(gpu.set, gpu, x, y, txt)
+end
+
+local fs = findProxy("filesystem")
+if not fs then
+  show(12, "No filesystem found. Insert system disk & reboot.", 0xFF0000)
+  return
+end
+
+local bootPaths = {"/boot/init.lua", "/boot/kernel.lua", "/init.lua"}
+for _, p in ipairs(bootPaths) do
+  if fs.exists(p) then
+    show(12, "Found: "..p.." — loading...", 0x00FF00)
+    local h = fs.open(p, "r")
+    if not h then show(14, "Cannot open file: "..p, 0xFF5555); return end
+    local data = ""
+    repeat
+      local chunk = fs.read(h, 65536)
+      data = data .. (chunk or "")
+    until not chunk
+    fs.close(h)
+    local ok, chunkOrErr = load(data, "="..p)
+    if not ok then
+      show(14, "Load error: "..tostring(chunkOrErr), 0xFF5555)
+      return
+    end
+    local succ, err = pcall(chunkOrErr)
+    if not succ then show(14, "Runtime error: "..tostring(err), 0xFF5555) end
+    return
+  end
+end
+
+show(12, "No bootable FixOS found on disk.", 0xFF0000)
