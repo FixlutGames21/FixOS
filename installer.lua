@@ -1,7 +1,7 @@
--- installer_graphical.lua
--- FixOS Graphical Installer (stable, safe, 100x50)
+-- installer_graphical_github_only.lua
+-- FixOS Graphical Installer (GitHub-only downloads, stable)
 -- Author: Fixlut & GPT-5 Thinking mini
--- Put in /home/installer.lua and run with: dofile("/home/installer.lua")
+-- Place as /home/installer.lua and run: dofile("/home/installer.lua")
 
 -- SAFE REQUIRES
 local ok, component = pcall(require, "component"); if not ok then component = _G.component end
@@ -11,10 +11,7 @@ local ok4, term = pcall(require, "term"); if not ok4 then term = _G.term end
 local unicode = _G.unicode
 
 -- CONFIG
-local GITHUB_BASES = {
-  "https://raw.githubusercontent.com/FixlutGames21/FixOS/main/",
-  "https://raw.githubusercontent.com/FixlutGames21/FixOS/master/"
-}
+local GITHUB_BASE = "https://raw.githubusercontent.com/FixlutGames21/FixOS/main/"
 local FILES = {
   "boot/init.lua",
   "boot/kernel.lua",
@@ -27,6 +24,8 @@ local FILES = {
   "FixBIOS.lua"
 }
 local RES_W, RES_H = 100, 50
+
+-- COLORS
 local BG = 0x0F0F10
 local FG = 0xE6E6E6
 local ACCENT = 0x00C080
@@ -38,10 +37,11 @@ local function getFirstProxy(kind)
   for addr in component.list(kind) do return component.proxy(addr) end
   return nil
 end
+
 local gpu = getFirstProxy("gpu")
 local screenAddr = component.list("screen")() -- may be nil
 local eepromProxy = getFirstProxy("eeprom")
-local internetAvailable = component.isAvailable and component.isAvailable("internet")
+local internetProxy = getFirstProxy("internet") -- proxy or nil
 
 -- SAFE RESOLUTION SET
 local function trySetResolution(w,h)
@@ -80,7 +80,9 @@ local function drawText(x,y,color,text)
 end
 
 local function drawCentered(y, color, text)
-  if not gpu then return end
+  if not gpu then
+    term.write(text .. "\n"); return
+  end
   pcall(function()
     local ok, w = pcall(gpu.getResolution, gpu)
     if not ok or not w then return end
@@ -103,8 +105,8 @@ local function drawBox(x,y,w,h, bg, fg, title)
   end)
 end
 
--- PROGRESS BAR (centered)
-local function drawProgress(pct) -- pct 0..1
+-- PROGRESS BAR
+local function drawProgress(pct)
   local ok, w = pcall(gpu.getResolution, gpu)
   if not ok or not w then return end
   local barw = math.min(60, w - 30)
@@ -126,23 +128,23 @@ end
 local LOG_LINES = {}
 local function logPush(line)
   table.insert(LOG_LINES, line)
-  if #LOG_LINES > 10 then table.remove(LOG_LINES,1) end
+  if #LOG_LINES > 12 then table.remove(LOG_LINES,1) end
 end
 local function drawLog()
   local ok, w, h = pcall(gpu.getResolution, gpu)
   if not ok or not w or not h then return end
-  local lx = 4; local ly = h - 12; local lw = w - 8; local lh = 10
+  local lx = 4; local ly = h - 14; local lw = w - 8; local lh = 12
   pcall(function()
     gpu.setBackground(0x101010); gpu.fill(lx, ly, lw, lh, " ")
     gpu.setForeground(LOG_COLOR)
-    for i=1,#LOG_LINES do
+    for i = 1, #LOG_LINES do
       local line = LOG_LINES[i]
       gpu.set(lx+1, ly + i - 1, tostring(line))
     end
   end)
 end
 
--- BUTTONS: track rectangles and click test
+-- BUTTONS
 local BUTTONS = {}
 local function addButton(id, x,y,w,h, label, cb)
   BUTTONS[id] = {x=x,y=y,w=w,h=h,label=label,cb=cb}
@@ -172,50 +174,7 @@ local function hitTest(x,y)
   return nil,nil
 end
 
--- ROBUST FETCH (iterator or table)
-local function fetch_remote(path)
-  if not (component and component.isAvailable and component.isAvailable("internet")) then
-    return nil, "no internet card"
-  end
-  for _, base in ipairs(GITHUB_BASES) do
-    local url = base .. path
-    local ok, handle_or_err = pcall(component.internet.request, component.internet, url)
-    if ok and handle_or_err then
-      local data = ""
-      if type(handle_or_err) == "table" then
-        for _, chunk in pairs(handle_or_err) do if type(chunk) == "string" then data = data .. chunk end end
-      else
-        for chunk in handle_or_err do data = data .. (chunk or "") end
-        if handle_or_err.close then pcall(handle_or_err.close, handle_or_err) end
-      end
-      if type(data) == "string" and not data:match("^%s*<") then
-        return data, nil
-      end
-    end
-  end
-  return nil, "all remote bases failed"
-end
-
--- LOCAL fallback
-local function fetch_local(path)
-  local localPath = "/disk/FixOS/" .. path
-  if filesystem.exists(localPath) then
-    local f = io.open(localPath, "r")
-    if not f then return nil, "cannot open local file" end
-    local content = f:read("*a"); f:close(); return content, nil
-  end
-  return nil, "no local fallback"
-end
-
-local function fetch_with_fallback(path)
-  local data, err = fetch_remote(path)
-  if data then return data end
-  local d2, e2 = fetch_local(path)
-  if d2 then return d2 end
-  return nil, (err or "") .. "; " .. (e2 or "")
-end
-
--- WRITE FILE safely (uses standard OpenOS io - installer runs in shell)
+-- WRITE FILE safely
 local function write_file(dest, content)
   if type(content) ~= "string" then return false, "content not string" end
   local dir = dest:match("(.+)/[^/]+$")
@@ -226,10 +185,9 @@ local function write_file(dest, content)
   return true
 end
 
--- SAFE EEPROM WRITE (backup + restore helper)
+-- SAFE EEPROM WRITE (backup + helper)
 local function safe_write_eeprom(eepromProxy, content, label)
   if not eepromProxy then return false, "no eeprom" end
-  -- backup
   local ok, cur = pcall(function() return eepromProxy.get() end)
   if ok and cur and cur ~= "" then
     local bf = io.open("/eeprom_backup.lua","w")
@@ -255,46 +213,74 @@ pcall(e.set, d); print("EEPROM restored")
   return true
 end
 
--- INSTALL FLOW (downloads FILES and writes them)
+-- GITHUB-ONLY FETCH
+local function fetch_from_github(path)
+  if not internetProxy then return nil, "no internet card" end
+  local url = GITHUB_BASE .. path
+  logPush("GET " .. url)
+  -- request: use proxy.request with bound proxy
+  local ok_req, handle_or_err = pcall(internetProxy.request, internetProxy, url)
+  if not ok_req or not handle_or_err then
+    return nil, "request failed: " .. tostring(handle_or_err)
+  end
+  local data = ""
+  -- handle can be iterator or table
+  if type(handle_or_err) == "table" then
+    for _, chunk in pairs(handle_or_err) do
+      if type(chunk) == "string" then data = data .. chunk end
+    end
+  else
+    for chunk in handle_or_err do
+      if chunk then data = data .. chunk end
+    end
+    if handle_or_err.close then pcall(handle_or_err.close, handle_or_err) end
+  end
+  if data == "" then return nil, "empty response" end
+  if data:match("^%s*<") then return nil, "html response (404 or github page)" end
+  return data, nil
+end
+
+-- INSTALL FLOW (GitHub-only)
 local function install_flow(onProgress)
-  logPush("Start install_flow")
+  logPush("Start GitHub-only install")
   local total = #FILES
   for i, rel in ipairs(FILES) do
     logPush("Downloading: " .. rel)
-    local content, err = fetch_with_fallback(rel)
+    local content, err = fetch_from_github(rel)
     if not content then
-      logPush("Failed: " .. tostring(rel) .. " -> " .. tostring(err))
-      return false, ("Failed to fetch %s: %s"):format(rel, tostring(err))
+      logPush("Failed to download " .. rel .. " -> " .. tostring(err))
+      return false, ("Failed to download %s: %s"):format(rel, tostring(err))
     end
     local dest = "/" .. rel
     local ok, werr = write_file(dest, content)
     if not ok then
-      logPush("Write failed: " .. tostring(werr))
+      logPush("Failed to write " .. dest .. " -> " .. tostring(werr))
       return false, ("Failed to write %s: %s"):format(dest, tostring(werr))
     end
     if onProgress then onProgress(i/total) end
-    os.sleep(0.08) -- smooth UI
+    os.sleep(0.06)
   end
-  logPush("All files installed.")
+  logPush("Install_flow finished successfully.")
   return true, nil
 end
 
 -- UI CALLBACKS
 local installInProgress = false
+
 local function onInstallClick()
   if installInProgress then return end
   installInProgress = true
-  logPush("User started installation.")
-  -- ask confirm destructive
-  drawCentered(RES_H/2 + 2, WARN, "Type EXACT: ERASE AND INSTALL in console and Enter to proceed")
+  logPush("User clicked Install")
+  drawCentered(RES_H/2 + 2, WARN, "Type EXACT: ERASE AND INSTALL in console to proceed")
   term.write("\n> ")
   local conf = io.read()
   if conf ~= "ERASE AND INSTALL" then
-    logPush("User canceled erase.")
+    logPush("User canceled ERASE AND INSTALL")
     installInProgress = false
     return
   end
-  -- pick target filesystem proxy
+
+  -- choose target fs proxy
   local target = nil
   local bootAddr = computer.getBootAddress()
   if bootAddr then
@@ -304,12 +290,14 @@ local function onInstallClick()
     for addr in component.list("filesystem") do target = component.proxy(addr); break end
   end
   if not target then
-    logPush("No filesystem found")
+    logPush("No filesystem proxy available")
+    drawCentered(RES_H/2 + 4, WARN, "No filesystem device found. Insert disk.")
     installInProgress = false
     return
   end
-  -- format target via proxy (safe)
-  logPush("Formatting target...")
+
+  -- format target
+  logPush("Formatting target filesystem")
   do
     local function proxy_remove_recursive(proxy, path)
       local list = proxy.list(path)
@@ -326,15 +314,16 @@ local function onInstallClick()
       else pcall(target.remove, p) end
     end
   end
-  -- run install_flow with progress callback
-  local ok, err = install_flow(function(pct) drawProgress(pct) drawLog() end)
+
+  -- download & write from GitHub
+  local ok, err = install_flow(function(pct) drawProgress(pct); drawLog() end)
   if not ok then
-    logPush("Install failed: " .. tostring(err))
-    drawCentered(RES_H/2 + 4, WARN, "Install failed: "..tostring(err))
+    logPush("Installation failed: " .. tostring(err))
+    drawCentered(RES_H/2 + 4, WARN, "Install failed: " .. tostring(err))
     installInProgress = false
     return
   end
-  drawProgress(1.0); drawLog()
+
   -- write autorun
   write_file("/autorun.lua", [[
 term.clear()
@@ -342,67 +331,61 @@ local s = loadfile("/boot/shell.lua") or loadfile("/boot/init.lua")
 if s then pcall(s) end
 ]])
   logPush("Autorun written.")
-  -- BIOS write prompt
+
+  -- EEPROM write option
   if eepromProxy then
-    term.write("\nType EXACT: WRITE BIOS  to write FixBIOS to EEPROM (or Enter to skip): ")
+    term.write("\nType EXACT: WRITE BIOS to write FixBIOS to EEPROM (or Enter to skip): ")
     local wb = io.read()
     if wb == "WRITE BIOS" then
-      -- fetch BIOS if available, else use embedded (simple)
-      local bios, berr = fetch_with_fallback("FixBIOS.lua")
+      local bios, berr = fetch_from_github("FixBIOS.lua")
       if not bios then
-        bios = "-- embedded minimal BIOS\nlocal component = component\nfor a,t in component.list('filesystem') do local p = component.proxy(a) if p.exists('/boot/init.lua') then local h = p.open('/boot/init.lua','r') local s = '' repeat local c=p.read(h,65536) s=s..(c or '') until not c p.close(h) local f=load(s,'=init') if f then pcall(f) end return end end"
+        logPush("Failed to fetch FixBIOS.lua: " .. tostring(berr))
+        drawCentered(RES_H/2 + 6, WARN, "Failed to fetch FixBIOS.lua: " .. tostring(berr))
+      else
+        local okw, werr = safe_write_eeprom(eepromProxy, bios, "FixBIOS")
+        if okw then logPush("EEPROM flashed.") drawCentered(RES_H/2 + 6, ACCENT, "EEPROM flashed.") else logPush("EEPROM write failed: "..tostring(werr)) drawCentered(RES_H/2 + 6, WARN, "EEPROM write failed: "..tostring(werr)) end
       end
-      local okw, werr = safe_write_eeprom(eepromProxy, bios, "FixBIOS")
-      if okw then logPush("EEPROM written.") drawCentered(RES_H/2 + 6, ACCENT, "EEPROM flashed.") else logPush("EEPROM failed: "..tostring(werr)) drawCentered(RES_H/2 + 6, WARN, "EEPROM write failed: "..tostring(werr)) end
     else
-      logPush("User skipped EEPROM write.")
+      logPush("User skipped EEPROM write")
     end
   else
-    logPush("No EEPROM present; skipped BIOS write.")
+    logPush("No EEPROM present; skipped BIOS write")
   end
+
   drawCentered(RES_H/2 + 8, ACCENT, "Install complete. Reboot? (y/n) in console")
   term.write("\n> ")
   if (io.read() or ""):lower():sub(1,1) == "y" then computer.shutdown(true) end
+
   installInProgress = false
 end
 
--- SETTINGS callback (simple personalization + update)
+-- SETTINGS (small)
 local function onSettingsClick()
   clearScreen()
   drawCentered(6, ACCENT, "Settings")
-  drawCentered(10, FG, "1) Personalization")
-  drawCentered(12, FG, "2) Check for updates")
+  drawCentered(10, FG, "1) Personalization (theme/label)")
+  drawCentered(12, FG, "2) Check for updates on GitHub")
   drawCentered(14, FG, "3) Back")
-  term.write("\nChoose option: ")
+  term.write("\nChoice: ")
   local c = io.read() or ""
   if c == "1" then
     clearScreen(); drawCentered(6, ACCENT, "Personalization")
     drawCentered(10, FG, "Theme (green/blue/red) or Enter to skip: ")
     term.write("> "); local theme = (io.read() or ""):gsub("%s+","")
-    drawCentered(14, FG, "Label for BIOS (Enter to skip): ")
-    term.write("> "); local label = (io.read() or ""):gsub("^%s+",""):gsub("%s+$","")
-    local conf = { theme = theme ~= "" and theme or "green", label = label ~= "" and label or "FixOS" }
-    -- save conf simple as Lua table
-    local out = "return {\n  theme = " .. ("%q"):format(conf.theme) .. ",\n  label = " .. ("%q"):format(conf.label) .. ",\n}\n"
+    drawCentered(14, FG, "Label for BIOS (Enter to skip): "); term.write("> "); local label = (io.read() or ""):gsub("^%s+",""):gsub("%s+$","")
+    local out = "return {\n  theme = " .. ("%q"):format(theme ~= "" and theme or "green") .. ",\n  label = " .. ("%q"):format(label ~= "" and label or "FixOS") .. ",\n}\n"
     write_file("/etc/fixos.conf", out)
-    logPush("Personalization saved.")
+    logPush("Personalization updated")
     drawCentered(20, ACCENT, "Saved. Press Enter..."); io.read()
   elseif c == "2" then
-    clearScreen(); drawCentered(6, ACCENT, "Checking updates...")
-    local data, err = fetch_remote("boot/init.lua")
+    clearScreen(); drawCentered(6, ACCENT, "Checking for updates...")
+    local data, err = fetch_from_github("boot/init.lua")
     if data then
       drawCentered(10, ACCENT, "Update available on GitHub.")
-      drawCentered(12, FG, "Download and install? (y/n): "); term.write("> "); local yn = io.read() or ""
+      drawCentered(12, FG, "Download and install? (y/n)"); term.write("> "); local yn = io.read() or ""
       if yn:lower():sub(1,1) == "y" then
-        -- fetch all files and overwrite
-        for i, rel in ipairs(FILES) do
-          drawCentered(14, FG, "Updating: " .. rel)
-          local content, ferr = fetch_with_fallback(rel)
-          if content then write_file("/" .. rel, content) end
-          os.sleep(0.06)
-        end
-        logPush("Update completed.")
-        drawCentered(18, ACCENT, "Update finished. Press Enter..."); io.read()
+        local ok2, err2 = install_flow(function(pct) drawProgress(pct); drawLog() end)
+        if ok2 then logPush("Update completed"); drawCentered(16, ACCENT, "Update done. Press Enter..."); io.read() end
       end
     else
       drawCentered(10, WARN, "No update or no internet: " .. tostring(err))
@@ -413,41 +396,35 @@ local function onSettingsClick()
   end
 end
 
--- BUILD MAIN UI
+-- BUILD UI
 local function buildUI()
   trySetResolution(RES_W, RES_H)
   clearScreen()
-  -- header
   drawBox(4,2, RES_W-8, 8, 0x101010, FG, " FixOS Installer ")
-  drawCentered(4, ACCENT, "FixOS — Graphical Installer")
+  drawCentered(4, ACCENT, "FixOS — Graphical Installer (GitHub-only)")
   drawCentered(5, FG, "Stable · Safe · 100x50 (if supported)")
-  -- main panel
   drawBox(6,12, RES_W-20, 18, 0x141414, FG, " Actions ")
-  -- buttons positions relative to panel
-  local panelX = 8; local panelY = 14; local panelW = RES_W-24
+  local panelX = 8; local panelY = 14
   addButton("start", panelX + 2, panelY+2, 20, 3, "Пуск / Boot", function() end)
   addButton("install", panelX + 24, panelY+2, 28, 3, "Install FixOS", onInstallClick)
   addButton("settings", panelX + 54, panelY+2, 20, 3, "Налаштування", onSettingsClick)
-  -- progress and log
   drawProgress(0)
   drawLog()
   redrawButtons()
-  drawCentered(RES_H-4, LOG_COLOR, "Logs below — use console prompts for confirmations")
+  drawCentered(RES_H-4, LOG_COLOR, "Logs below — follow console prompts for confirmations")
 end
 
--- MAIN EVENT LOOP: handle key & touch (click) events safely using computer.pullSignal
+-- MAIN EVENT LOOP
 local function mainLoop()
   buildUI()
   drawLog()
   while true do
     drawLog()
-    -- wait for a signal with timeout to keep UI responsive
-    local ev = { computer.pullSignal(0.5) } -- correct signature: timeout number OR nil
+    local ev = { computer.pullSignal(0.5) } -- safe usage with timeout
     if ev[1] == "touch" or ev[1] == "mouseup" then
-      local _, _, x, y = ev[1], ev[2], ev[3], ev[4]
-      local id, b = hitTest(x,y)
+      local x = ev[3]; local y = ev[4]
+      local id,b = hitTest(x,y)
       if id and b and b.cb then
-        -- visually show button press
         pcall(function()
           gpu.setBackground(0x404040); gpu.fill(b.x,b.y,b.w,b.h," ")
           gpu.setForeground(0xFFFFFF)
@@ -455,23 +432,19 @@ local function mainLoop()
           os.sleep(0.12)
           redrawButtons(); drawLog()
         end)
-        -- call callback
         pcall(function() b.cb() end)
-        buildUI() -- rebuild in case UI changed
+        buildUI()
       end
     elseif ev[1] == "key_down" then
       local key = ev[4]
-      if key == 28 then -- Enter -> run default Install
+      if key == 28 then
         local b = BUTTONS["install"]
         if b and b.cb then pcall(b.cb) end
-      elseif key == 57 then -- space -> settings
-        local b2 = BUTTONS["settings"]
-        if b2 and b2.cb then pcall(b2.cb) end
-      elseif key == 200 or key == 208 then
-        -- up/down arrow - ignored for now
+      elseif key == 57 then
+        local b = BUTTONS["settings"]
+        if b and b.cb then pcall(b.cb) end
       end
     end
-    -- keep progress visible if in progress
     if installInProgress then drawProgress(0.5) end
   end
 end
@@ -479,6 +452,6 @@ end
 -- START
 clearScreen()
 buildUI()
-drawCentered(RES_H-8, FG, "Use mouse/touch or keyboard. Enter = Install, Space = Settings")
+drawCentered(RES_H-8, FG, "Enter = Install, Space = Settings. Use mouse/touch.")
 drawLog()
 mainLoop()
