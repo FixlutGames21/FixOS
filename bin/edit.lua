@@ -1,24 +1,18 @@
--- bin/edit.lua
--- Very simple single-line editor or write file content
+-- tiny edit: edit <path>
 local fs = require("filesystem")
-local path = ...
-if not path or path == "" then
-  print("Usage: edit <path>")
-  return
-end
-print("Editing:", path)
-print("Enter text. Finish with a single line containing only :wq")
+local path = ( ... )
+if not path then print("Usage: edit <path>") return end
+local f = io.open(path, "r")
+local content = ""
+if f then content = f:read("*a"); f:close() end
+print("Enter content. End with a single line containing only EOF")
 local lines = {}
 while true do
-  local l = io.read()
-  if not l then break end
-  if l == ":wq" then break end
-  table.insert(lines, l)
+  local line = io.read()
+  if not line or line == "EOF" then break end
+  table.insert(lines, line)
 end
-local ok, err = pcall(function()
-  fs.makeDirectory(fs.path(path))
-  local f = io.open(path, "w")
-  f:write(table.concat(lines, "\n"))
-  f:close()
-end)
-if not ok then print("Save error: "..tostring(err)) else print("Saved "..path) end
+local out = io.open(path, "w")
+out:write(table.concat(lines, "\n"))
+out:close()
+print("Saved.")

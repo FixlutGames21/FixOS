@@ -1,7 +1,7 @@
--- bin/ls.lua
+-- simple ls
 local fs = require("filesystem")
-local path = ...
-if not path or path == "" then path = "/" end
-for entry in fs.list(path) do
-  print(entry)
+local args = { ... }
+local path = args[1] or "."
+for name in fs.list(path) do
+  print(name)
 end

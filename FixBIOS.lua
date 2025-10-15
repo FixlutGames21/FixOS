@@ -1,4 +1,4 @@
--- FixBIOS (stable, safe)
+-- FixBIOS.lua — Stable vPro2 (for EEPROM)
 local component = component
 local computer = computer
 local unicode = unicode
@@ -13,6 +13,7 @@ end
 local gpu = findProxy("gpu")
 local screen = findProxy("screen")
 local eeprom = findProxy("eeprom")
+
 if gpu and screen then
   pcall(function()
     gpu.bind(screen.address)
@@ -20,13 +21,13 @@ if gpu and screen then
     pcall(gpu.setBackground, gpu, 0x000000)
     pcall(gpu.setForeground, gpu, 0x00FF00)
     pcall(gpu.fill, gpu, 1,1,100,50," ")
-    pcall(gpu.set, gpu, 36, 6, "███████╗██╗██╗  ██╗ ██████╗ ███████╗")
-    pcall(gpu.set, gpu, 36, 7, "██╔════╝██║██║ ██╔╝██╔═══██╗██╔════╝")
-    pcall(gpu.set, gpu, 36, 8, "███████╗██║█████╔╝ ██║   ██║█████╗  ")
-    pcall(gpu.set, gpu, 36, 9, "╚════██║██║██╔═██╗ ██║   ██║██╔══╝  ")
-    pcall(gpu.set, gpu, 36,10, "███████║██║██║  ██╗╚██████╔╝██║     ")
-    pcall(gpu.set, gpu, 36,11, "╚══════╝╚═╝╚═╝  ╚═╝ ╚═════╝ ╚═╝     ")
-    pcall(gpu.set, gpu, 48,14, "FixBIOS — Stable")
+    pcall(gpu.set, gpu, 36,6,"███████╗██╗██╗  ██╗ ██████╗ ███████╗")
+    pcall(gpu.set, gpu, 36,7,"██╔════╝██║██║ ██╔╝██╔═══██╗██╔════╝")
+    pcall(gpu.set, gpu, 36,8,"███████╗██║█████╔╝ ██║   ██║█████╗  ")
+    pcall(gpu.set, gpu, 36,9,"╚════██║██║██╔═██╗ ██║   ██║██╔══╝  ")
+    pcall(gpu.set, gpu, 36,10,"███████║██║██║  ██╗╚██████╔╝██║     ")
+    pcall(gpu.set, gpu, 36,11,"╚══════╝╚═╝╚═╝  ╚═╝ ╚═════╝ ╚═╝     ")
+    pcall(gpu.set, gpu, 48,14, "FixBIOS vPro2 — Booting")
   end)
 end
 
@@ -40,24 +41,21 @@ local function show(y, txt, color)
   pcall(gpu.set, gpu, x, y, txt)
 end
 
-local fs = findProxy("filesystem")
-if not fs then
-  show(12, "No filesystem found. Insert system disk & reboot.", 0xFF0000)
+local fsproxy = findProxy("filesystem")
+if not fsproxy then
+  show(12, "No filesystem found. Insert disk & reboot.", 0xFF0000)
   return
 end
 
 local bootPaths = {"/boot/init.lua", "/boot/kernel.lua", "/init.lua"}
 for _, p in ipairs(bootPaths) do
-  if fs.exists(p) then
+  if fsproxy.exists(p) then
     show(12, "Found: "..p.." — loading...", 0x00FF00)
-    local h = fs.open(p, "r")
+    local h = fsproxy.open(p,"r")
     if not h then show(14, "Cannot open file: "..p, 0xFF5555); return end
     local data = ""
-    repeat
-      local chunk = fs.read(h, 65536)
-      data = data .. (chunk or "")
-    until not chunk
-    fs.close(h)
+    repeat local chunk = fsproxy.read(h, 65536) data = data .. (chunk or "") until not chunk
+    fsproxy.close(h)
     local ok, chunkOrErr = load(data, "="..p)
     if not ok then
       show(14, "Load error: "..tostring(chunkOrErr), 0xFF5555)

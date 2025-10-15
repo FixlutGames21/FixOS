@@ -1,11 +1,10 @@
--- bin/calc.lua
-io.write("Expression> ")
-local expr = io.read()
-if not expr or expr == "" then print("No expression") return end
-local f, err = load("return " .. expr)
-if not f then
-  print("Invalid expression: "..tostring(err))
-  return
+-- tiny calc: calc <expr> e.g. calc 2+2*3
+local args = { ... }
+local expr = table.concat(args, " ")
+local ok, res = pcall(load("return " .. expr))
+if ok then
+  local ok2, val = pcall(res)
+  if ok2 then print(val) else print("runtime error") end
+else
+  print("bad expression")
 end
-local ok, res = pcall(f)
-if ok then print("Result: "..tostring(res)) else print("Error evaluating expression") end
