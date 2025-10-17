@@ -1,18 +1,16 @@
--- tiny edit: edit <path>
+local term = require("term")
 local fs = require("filesystem")
-local path = ( ... )
-if not path then print("Usage: edit <path>") return end
-local f = io.open(path, "r")
-local content = ""
-if f then content = f:read("*a"); f:close() end
-print("Enter content. End with a single line containing only EOF")
-local lines = {}
+term.clear()
+print("FixOS Text Editor")
+io.write("File name: ")
+local path = io.read()
+local f = io.open(path, "w")
+print("Type text (end with a single line '.'): ")
 while true do
   local line = io.read()
-  if not line or line == "EOF" then break end
-  table.insert(lines, line)
+  if line == "." then break end
+  f:write(line .. "\n")
 end
-local out = io.open(path, "w")
-out:write(table.concat(lines, "\n"))
-out:close()
+f:close()
 print("Saved.")
+term.read()

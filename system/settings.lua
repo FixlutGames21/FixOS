@@ -1,0 +1,13 @@
+local gpu = require("component").gpu
+local term = require("term")
+gpu.setBackground(0x0000AA)
+gpu.fill(1,1,80,25," ")
+gpu.setForeground(0xFFFF00)
+term.setCursor(2,2)
+print("FixOS 2000 Settings")
+term.setCursor(2,4)
+print("No settings yet, come back later.")
+term.setCursor(2,6)
+print("Press any key to return.")
+term.read()
+dofile("/system/desktop.lua")
