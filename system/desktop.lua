@@ -1,5 +1,8 @@
-local gpu = require("component").gpu
+local component = require("component")
 local term = require("term")
+local event = require("event")
+
+local gpu = component.gpu
 
 local function drawDesktop()
   gpu.setBackground(0x0000AA)
@@ -11,8 +14,20 @@ end
 
 drawDesktop()
 while true do
-  local _,_,_,_,_,key = term.pull("key_down")
-  if key == 46 then os.execute("/system/startmenu.lua") end
-  if key == 20 then os.execute("/system/settings.lua") end
-  if key == 45 then os.exit() end
+  local _,_,_,char,code = event.pull("key_down")
+  -- S key (code 31) for Start Menu
+  if code == 31 then 
+    dofile("/system/startmenu.lua")
+    drawDesktop() -- Redraw after returning
+  end
+  -- T key (code 20) for Settings
+  if code == 20 then 
+    dofile("/system/settings.lua")
+    -- Settings already returns to desktop
+  end
+  -- X key (code 45) for Exit
+  if code == 45 then 
+    term.clear()
+    os.exit() 
+  end
 end
