@@ -1,17 +1,23 @@
 -- installer.lua
--- FixOS 2000 Installer (ВИПРАВЛЕНА ВЕРСІЯ)
--- Встановлення: помістіть як /home/installer.lua і запустіть: dofile("/home/installer.lua")
+-- FixOS 2000 Installer - ПОКРАЩЕНА ВЕРСІЯ
+-- З кастомною прошивкою BIOS та надійним завантаженням
+-- Встановлення: dofile("/home/installer.lua")
 
 local component = require("component")
 local computer = require("computer")
 local filesystem = require("filesystem")
 local term = require("term")
-local unicode = _G.unicode
+local unicode = _G.unicode or {}
 
 local pull = computer.pullSignal
 
 -- CONFIG
-local BASE_RAW = "https://raw.githubusercontent.com/FixlutGames21/FixOS/main"
+local GITHUB_USER = "FixlutGames21"
+local GITHUB_REPO = "FixOS"
+local GITHUB_BRANCH = "main"
+local BASE_URL = string.format("https://raw.githubusercontent.com/%s/%s/%s", 
+                               GITHUB_USER, GITHUB_REPO, GITHUB_BRANCH)
+
 local FILES = {
   "system/gui/win2000ui.lua",
   "system/desktop.lua",
@@ -25,7 +31,68 @@ local FILES = {
   "bin/calc.lua"
 }
 
--- GRAPHICS PROXIES
+-- BIOS код для EEPROM
+local BIOS_CODE = [[
+local component = require("component")
+local computer = require("computer")
+
+local bootAddr = component.eeprom.getData()
+local gpu = component.list("gpu")()
+local screen = component.list("screen")()
+
+if gpu and screen then
+  local g = component.proxy(gpu)
+  g.bind(screen)
+  g.setResolution(50, 16)
+  g.setBackground(0x000000)
+  g.setForeground(0x00FF00)
+  g.fill(1, 1, 50, 16, " ")
+  g.set(2, 2, "FixOS 2000 BIOS")
+  g.set(2, 4, "Booting from: " .. (bootAddr or "auto"):sub(1, 8))
+end
+
+local function tryBoot(addr)
+  local fs = component.proxy(addr)
+  if not fs then return false end
+  
+  local handle = fs.open("/boot/init.lua")
+  if not handle then return false end
+  
+  local buffer = ""
+  repeat
+    local data = fs.read(handle, math.huge)
+    buffer = buffer .. (data or "")
+  until not data
+  fs.close(handle)
+  
+  local fn, err = load(buffer, "=init")
+  if not fn then
+    error("Boot error: " .. tostring(err))
+  end
+  
+  fn()
+  return true
+end
+
+-- Спроба завантаження
+local success = false
+if bootAddr then
+  success = pcall(tryBoot, bootAddr)
+end
+
+if not success then
+  local bootFS = computer.getBootAddress()
+  if bootFS then
+    success = pcall(tryBoot, bootFS)
+  end
+end
+
+if not success then
+  error("No bootable device found")
+end
+]]
+
+-- COMPONENTS
 local gpuAddr = component.list("gpu")()
 local screenAddr = component.list("screen")()
 local gpu = gpuAddr and component.proxy(gpuAddr) or nil
@@ -36,7 +103,8 @@ local eeprom = eepromAddr and component.proxy(eepromAddr) or nil
 
 -- UTILS
 local function txtlen(s)
-  if unicode and unicode.len then return unicode.len(s) else return #s end
+  if unicode.len then return unicode.len(s) end
+  return #s
 end
 
 local function safeBind()
@@ -56,7 +124,8 @@ local function setResolution(w, h)
   if not gpu then return false end
   pcall(function()
     safeBind()
-    pcall(gpu.setResolution, gpu, w, h)
+    local maxW, maxH = gpu.maxResolution()
+    gpu.setResolution(math.min(w, maxW), math.min(h, maxH))
   end)
   return true
 end
@@ -87,70 +156,65 @@ local function drawText(x, y, color, text)
 end
 
 local function centerY(row, color, text)
-  local w, _ = resolution()
+  local w = resolution()
   local x = math.floor(w / 2 - txtlen(text) / 2)
-  drawText(x, row, color, text)
+  drawText(math.max(1, x), row, color, text)
 end
 
--- Завантаження з GitHub (виправлена версія)
-local function fetch_from_github(path)
+-- ПОКРАЩЕНЕ ЗАВАНТАЖЕННЯ З GITHUB
+local function wget(url)
   if not internet then
-    return nil, "No internet card found"
+    return nil, "No internet card"
   end
   
-  local url = BASE_RAW .. "/" .. path
+  -- Retry логіка
+  local maxRetries = 3
+  local retryDelay = 1
   
-  -- internet.request повертає handle або nil, error
-  local handle, reason = internet.request(url)
-  
-  if not handle then
-    return nil, "Request failed: " .. tostring(reason)
-  end
-  
-  -- Чекаємо поки з'явиться відповідь
-  local startTime = computer.uptime()
-  local timeout = 15
-  
-  local result = {}
-  
-  while true do
-    if computer.uptime() - startTime > timeout then
-      pcall(handle.close)
-      return nil, "Download timeout"
-    end
+  for attempt = 1, maxRetries do
+    local handle = internet.request(url)
     
-    local chunk, err = handle.read(math.huge)
-    
-    if chunk then
-      table.insert(result, chunk)
-    else
-      if err then
-        pcall(handle.close)
-        return nil, "Read error: " .. tostring(err)
-      else
-        -- chunk == nil і err == nil означає кінець файлу
-        break
+    if handle then
+      local result = {}
+      local deadline = computer.uptime() + 30 -- 30 секунд на файл
+      
+      while computer.uptime() < deadline do
+        local chunk = handle.read(math.huge)
+        
+        if chunk then
+          table.insert(result, chunk)
+        else
+          -- nil означає кінець
+          handle.close()
+          local data = table.concat(result)
+          
+          if #data > 0 then
+            -- Перевірка на 404
+            if data:match("^%s*<!") or data:match("404: Not Found") then
+              return nil, "File not found (404)"
+            end
+            return data
+          else
+            break -- Пуста відповідь, спробуємо ще раз
+          end
+        end
       end
+      
+      pcall(handle.close)
     end
     
-    -- Невелика пауза щоб не перевантажувати процесор
-    os.sleep(0.05)
+    -- Якщо не вдалося - чекаємо і пробуємо знову
+    if attempt < maxRetries then
+      os.sleep(retryDelay)
+    end
   end
   
-  pcall(handle.close)
-  
-  local data = table.concat(result)
-  
-  if data == "" or #data == 0 then
-    return nil, "Empty response"
-  end
-  
-  -- Перевірка на HTML помилки (404 тощо)
-  if data:match("^%s*<!") or data:match("^%s*<html") then
-    return nil, "File not found (404)"
-  end
-  
-  return data
+  return nil, "Download failed after " .. maxRetries .. " attempts"
+end
+
+local function fetch_from_github(path)
+  local url = BASE_URL .. "/" .. path
+  return wget(url)
 end
 
 -- Запис файлу
@@ -161,15 +225,12 @@ local function write_file(path, content)
   
   local dir = path:match("(.+)/[^/]+$")
   if dir and not filesystem.exists(dir) then
-    local ok, err = filesystem.makeDirectory(dir)
-    if not ok then
-      return false, "Cannot create directory: " .. tostring(err)
-    end
+    filesystem.makeDirectory(dir)
   end
   
   local f, err = io.open(path, "w")
   if not f then
-    return false, "Cannot open file: " .. tostring(err)
+    return false, "Cannot open: " .. tostring(err)
   end
   
   f:write(content)
@@ -188,6 +249,7 @@ local function drawButton(id, x, y, w, h, bg, fg, label)
       local lx = x + math.floor((w - txtlen(label)) / 2)
       gpu.setForeground(fg)
       gpu.set(lx, y + math.floor(h / 2), label)
+      gpu.setBackground(0x000080)
     end)
   else
     print(("[%s] %s"):format(id, label))
@@ -204,56 +266,75 @@ local function hitButton(x, y)
   return nil
 end
 
--- Заголовок вікна
 local function draw_header(title)
-  local w, _ = resolution()
-  local titleBg = 0x000080
-  local titleFg = 0xFFFFFF
+  local w = resolution()
   pcall(function()
-    gpu.setBackground(titleBg)
+    gpu.setBackground(0x000080)
     gpu.fill(1, 1, w, 3, " ")
-    gpu.setForeground(titleFg)
+    gpu.setForeground(0xFFFFFF)
     gpu.set(2, 2, " FixOS 2000 Setup - " .. tostring(title))
-    gpu.setBackground(0x000000)
   end)
 end
 
--- EULA GUI
+-- Прошивка EEPROM
+local function flash_bios()
+  if not eeprom then
+    return false, "No EEPROM found"
+  end
+  
+  clearScreen(0x000080)
+  draw_header("Flashing BIOS")
+  
+  centerY(8, 0xFFFFFF, "Writing custom BIOS to EEPROM...")
+  centerY(10, 0xFFFF00, "Do not turn off the computer!")
+  
+  os.sleep(0.5)
+  
+  -- Встановлюємо код BIOS
+  local ok, err = pcall(function()
+    eeprom.set(BIOS_CODE)
+    eeprom.setLabel("FixOS BIOS")
+  end)
+  
+  if not ok then
+    return false, "Flash failed: " .. tostring(err)
+  end
+  
+  centerY(12, 0x00FF00, "BIOS flashed successfully!")
+  os.sleep(1)
+  
+  return true
+end
+
+-- EULA
 local function eula_gui()
   clearScreen(0x000080)
   draw_header("License Agreement")
   
-  centerY(6, 0xFFFFFF, "End User License Agreement - FixOS 2000")
-  centerY(8, 0xFFFFFF, "By installing this software you agree to the terms.")
-  centerY(10, 0xFFFFFF, "Click Accept to continue or Reject to cancel.")
+  centerY(6, 0xFFFFFF, "FixOS 2000 - End User License Agreement")
+  centerY(8, 0xFFFFFF, "By installing you agree to use this software")
+  centerY(9, 0xFFFFFF, "for educational and entertainment purposes.")
+  centerY(11, 0xFFFFFF, "Click Accept to continue or Reject to cancel.")
   
   BUTTONS = {}
-  drawButton("accept", 24, 14, 14, 3, 0x00AA00, 0xFFFFFF, "Accept")
-  drawButton("reject", 46, 14, 14, 3, 0xAA0000, 0xFFFFFF, "Reject")
+  drawButton("accept", 24, 15, 14, 3, 0x00AA00, 0xFFFFFF, "Accept")
+  drawButton("reject", 46, 15, 14, 3, 0xAA0000, 0xFFFFFF, "Reject")
   
   while true do
     local ev = {pull(0.5)}
-    local evname = ev[1]
     
-    if evname == "touch" or evname == "mouse_click" then
+    if ev[1] == "touch" then
       local x, y = ev[3], ev[4]
       local id = hitButton(x, y)
       
       if id == "accept" then
-        clearScreen(0x000080)
-        centerY(12, 0x00FF00, "License accepted. Continuing...")
-        os.sleep(1.0)
         return true
       elseif id == "reject" then
-        clearScreen(0x000080)
-        centerY(12, 0xFF4444, "Installation cancelled.")
-        os.sleep(1.2)
         return false
       end
-    elseif evname == "key_down" then
-      local key = ev[4]
-      if key == 28 then return true end -- Enter
-      if key == 1 then return false end -- Esc
+    elseif ev[1] == "key_down" then
+      if ev[4] == 28 then return true end -- Enter
+      if ev[4] == 1 then return false end -- Esc
     end
   end
 end
@@ -265,24 +346,25 @@ local function list_filesystems()
     local ok, proxy = pcall(component.proxy, addr)
     if ok and proxy then
       local info = {address = addr}
+      
       local ok2, label = pcall(proxy.getLabel, proxy)
       info.label = (ok2 and label and label ~= "") and label or addr:sub(1, 8)
       
       local ok3, readOnly = pcall(proxy.isReadOnly, proxy)
-      info.readOnly = not not readOnly
+      info.readOnly = readOnly or false
       
       local ok4, total = pcall(proxy.spaceTotal, proxy)
       info.spaceTotal = ok4 and total or 0
       
-      -- Пропускаємо tmpfs і дуже малі диски
-      if info.spaceTotal > 100000 then
+      -- Фільтр: тільки великі диски
+      if info.spaceTotal > 100000 and not info.label:match("tmpfs") then
         table.insert(list, info)
       end
     end
   end
   
   table.sort(list, function(a, b)
-    return (a.spaceTotal or 0) > (b.spaceTotal or 0)
+    return a.spaceTotal > b.spaceTotal
   end)
   
   return list
@@ -290,8 +372,11 @@ end
 
 local function humanSize(n)
   if not n or n <= 0 then return "??" end
-  if n > 1024 * 1024 then return string.format("%.1fMB", n / 1024 / 1024) end
-  if n > 1024 then return string.format("%.1fKB", n / 1024) end
+  if n >= 1024 * 1024 then
+    return string.format("%.1fMB", n / (1024 * 1024))
+  elseif n >= 1024 then
+    return string.format("%.1fKB", n / 1024)
+  end
   return tostring(n) .. "B"
 end
 
@@ -300,11 +385,11 @@ local function choose_disk_gui()
   clearScreen(0x000080)
   draw_header("Choose Installation Disk")
   
-  centerY(5, 0xFFFFFF, "Select target disk for installation")
+  centerY(5, 0xFFFFFF, "Select target disk for FixOS 2000")
   
   local list = list_filesystems()
   if #list == 0 then
-    centerY(8, 0xFFAAAA, "No suitable filesystem found.")
+    centerY(8, 0xFFAAAA, "No suitable filesystem found!")
     centerY(10, 0xFFFFFF, "Press any key to exit.")
     pull()
     return nil
@@ -317,16 +402,16 @@ local function choose_disk_gui()
     local label = string.format("%d) %s [%s]", i, info.label, humanSize(info.spaceTotal))
     if info.readOnly then label = label .. " (READ-ONLY)" end
     
-    drawButton("disk" .. i, 10, startY + (i - 1) * 3, 60, 2,
-               info.readOnly and 0x777777 or 0xDDDDDD, 0x000000, label)
+    drawButton("disk" .. i, 8, startY + (i - 1) * 3, 64, 2,
+               info.readOnly and 0x555555 or 0xCCCCCC, 0x000000, label)
   end
   
-  centerY(startY + #list * 3 + 1, 0xFFFFFF, "Click disk or press 1-9. ESC to cancel.")
+  centerY(startY + #list * 3 + 2, 0xFFFFFF, "Click disk or press number. ESC to cancel.")
   
   while true do
     local ev = {pull(0.5)}
     
-    if ev[1] == "touch" or ev[1] == "mouse_click" then
+    if ev[1] == "touch" then
       local x, y = ev[3], ev[4]
       local id = hitButton(x, y)
       
@@ -334,11 +419,13 @@ local function choose_disk_gui()
         local idx = tonumber(id:match("%d+"))
         local sel = list[idx]
         
-        if sel and sel.readOnly then
-          centerY(startY + #list * 3 + 3, 0xFF4444, "This disk is read-only!")
-          os.sleep(1.5)
-        else
-          return sel.address
+        if sel then
+          if sel.readOnly then
+            centerY(startY + #list * 3 + 4, 0xFF4444, "Cannot install to read-only disk!")
+            os.sleep(1.5)
+          else
+            return sel.address
+          end
         end
       end
     elseif ev[1] == "key_down" then
@@ -356,107 +443,139 @@ local function choose_disk_gui()
   end
 end
 
--- Форматування диска (ВИПРАВЛЕНА ВЕРСІЯ)
-local function format_target(addr)
-  -- Якщо це поточний диск, не форматуємо його повністю
+-- Підготовка диска
+local function prepare_disk(addr)
   local currentRoot = filesystem.get("/")
   if currentRoot and currentRoot.address == addr then
-    return true -- Не чіпаємо поточний диск
+    return true -- Поточний диск
   end
   
-  local ok, proxy = pcall(component.proxy, addr)
-  if not ok or not proxy then
-    return false, "Cannot access filesystem"
+  local proxy = component.proxy(addr)
+  if not proxy then
+    return false, "Cannot access disk"
   end
   
-  -- Видаляємо тільки конфліктуючі папки
+  -- Видаляємо старі файли FixOS
   local dirs = {"system", "boot", "bin"}
   for _, dir in ipairs(dirs) do
-    local path = "/" .. dir
-    if proxy.exists(path) then
-      pcall(proxy.remove, path)
-    end
+    pcall(proxy.remove, "/" .. dir)
   end
   
   return true
 end
 
--- Встановлення файлів (ВИПРАВЛЕНА ВЕРСІЯ)
-local function install_to_target(addr)
+-- Встановлення файлів
+local function install_files(targetAddr)
   local total = #FILES
+  local installed = 0
   
   for i, rel in ipairs(FILES) do
-    centerY(9, 0xFFFFFF, string.format("Downloading %d/%d: %s", i, total, rel))
+    -- Показуємо прогрес
+    clearScreen(0x000080)
+    draw_header("Installing FixOS 2000")
     
-    -- Завантаження файлу
-    local data, err = fetch_from_github(rel)
-    if not data then
-      centerY(11, 0xFFAAAA, "Download failed: " .. tostring(err))
-      os.sleep(2)
-      return false, "Download failed: " .. tostring(err)
-    end
-    
-    -- Запис файлу у поточну файлову систему
-    local full = "/" .. rel
-    local okw, werr = write_file(full, data)
-    if not okw then
-      centerY(11, 0xFFAAAA, "Write failed: " .. tostring(werr))
-      os.sleep(2)
-      return false, "Write failed: " .. tostring(werr)
-    end
+    centerY(7, 0xFFFFFF, string.format("File %d/%d", i, total))
+    centerY(8, 0xAAAAAA, rel)
     
     -- Прогрес бар
-    local pct = i / total
+    local pct = (i - 1) / total
     local barW = math.floor(pct * 60)
-    
     if gpu then
       pcall(function()
+        gpu.setBackground(0x555555)
+        gpu.fill(10, 11, 60, 1, " ")
         gpu.setBackground(0x00FF00)
-        gpu.fill(10, 13, barW, 1, " ")
+        gpu.fill(10, 11, barW, 1, " ")
         gpu.setBackground(0x000080)
       end)
-      centerY(15, 0xFFFFFF, string.format("%.0f%%", pct * 100))
+    end
+    centerY(13, 0xFFFFFF, string.format("%.0f%%", pct * 100))
+    
+    -- Завантаження
+    centerY(15, 0xFFFF00, "Downloading...")
+    local data, err = fetch_from_github(rel)
+    
+    if not data then
+      centerY(17, 0xFF4444, "Error: " .. tostring(err))
+      os.sleep(2)
+      return false, "Download failed: " .. rel
     end
     
+    -- Запис
+    centerY(15, 0xFFFF00, "Writing to disk...    ")
+    local ok, werr = write_file("/" .. rel, data)
+    
+    if not ok then
+      centerY(17, 0xFF4444, "Error: " .. tostring(werr))
+      os.sleep(2)
+      return false, "Write failed: " .. rel
+    end
+    
+    installed = installed + 1
     os.sleep(0.1)
   end
   
-  -- Налаштування EEPROM для завантаження з цього диска
-  if eeprom and addr then
+  -- Фінальний прогрес
+  clearScreen(0x000080)
+  draw_header("Installing FixOS 2000")
+  centerY(10, 0x00FF00, "All files installed successfully!")
+  
+  if gpu then
     pcall(function()
-      eeprom.setData(addr)
-      centerY(17, 0xFFFF00, "Boot device configured.")
+      gpu.setBackground(0x00FF00)
+      gpu.fill(10, 12, 60, 1, " ")
+      gpu.setBackground(0x000080)
     end)
+  end
+  centerY(14, 0xFFFFFF, "100%")
+  os.sleep(1)
+  
+  -- Налаштування EEPROM
+  if eeprom and targetAddr then
+    centerY(16, 0xFFFF00, "Configuring boot device...")
+    pcall(eeprom.setData, targetAddr)
     os.sleep(0.5)
   end
   
   return true
 end
 
--- Головний цикл
+-- Головна функція
 local function main()
+  -- Перевірка інтернету
+  if not internet then
+    print("ERROR: Internet Card required!")
+    print("Install an Internet Card and try again.")
+    print("Press any key to exit.")
+    pull()
+    return
+  end
+  
   safeBind()
-  setResolution(100, 36)
+  setResolution(80, 30)
+  
   clearScreen(0x000080)
   draw_header("Welcome")
   
   centerY(5, 0xFFFFFF, "Welcome to FixOS 2000 Installer")
-  centerY(7, 0xFFFFFF, "GUI Setup - Use mouse or keyboard")
-  centerY(9, 0xAAAAAA, "Press ESC at any time to cancel")
+  centerY(7, 0xAAAAAA, "Version 1.0 - Classic Edition")
+  centerY(9, 0xFFFFFF, "This will install FixOS on your computer")
+  centerY(10, 0xFFFFFF, "and flash a custom BIOS to EEPROM.")
   
   BUTTONS = {}
-  drawButton("start_install", 35, 16, 18, 3, 0x00AA00, 0xFFFFFF, "Install")
-  drawButton("quit", 35, 20, 18, 3, 0xAA0000, 0xFFFFFF, "Cancel")
+  drawButton("install", 25, 14, 20, 3, 0x00AA00, 0xFFFFFF, "Install")
+  drawButton("bios_only", 25, 18, 20, 3, 0x0088FF, 0xFFFFFF, "Flash BIOS Only")
+  drawButton("quit", 25, 22, 20, 3, 0xAA0000, 0xFFFFFF, "Exit")
   
   while true do
     local ev = {pull(0.5)}
     
-    if ev[1] == "touch" or ev[1] == "mouse_click" then
+    if ev[1] == "touch" then
       local x, y = ev[3], ev[4]
       local id = hitButton(x, y)
       
-      if id == "start_install" then
-        -- EULA
+      if id == "install" then
+        -- Повна інсталяція
         if not eula_gui() then
           clearScreen(0x000080)
           centerY(12, 0xFFFFFF, "Installation cancelled.")
@@ -464,7 +583,6 @@ local function main()
           return
         end
         
-        -- Вибір диска
         local target = choose_disk_gui()
         if not target then
           clearScreen(0x000080)
@@ -473,75 +591,63 @@ local function main()
           return
         end
         
-        -- Підтвердження
+        -- Підготовка
         clearScreen(0x000080)
-        draw_header("Confirm Installation")
-        centerY(8, 0xFFFFFF, "Ready to install FixOS 2000")
-        centerY(10, 0xFFFF00, "This will modify the selected disk.")
+        draw_header("Preparing")
+        centerY(10, 0xFFFFFF, "Preparing disk...")
         
-        BUTTONS = {}
-        drawButton("confirm", 25, 14, 16, 3, 0x00AA00, 0xFFFFFF, "Continue")
-        drawButton("cancel", 45, 14, 16, 3, 0xAA0000, 0xFFFFFF, "Cancel")
-        
-        while true do
-          local e = {pull(0.5)}
-          
-          if e[1] == "touch" or e[1] == "mouse_click" then
-            local xx, yy = e[3], e[4]
-            local bid = hitButton(xx, yy)
-            
-            if bid == "confirm" then
-              -- Форматування
-              clearScreen(0x000080)
-              draw_header("Installing")
-              centerY(8, 0xFFFFFF, "Preparing disk...")
-              
-              local okf, ferr = format_target(target)
-              if not okf then
-                clearScreen(0x000080)
-                centerY(10, 0xFF4444, "Format failed: " .. tostring(ferr))
-                centerY(12, 0xFFFFFF, "Press any key to exit.")
-                pull()
-                return
-              end
-              
-              -- Встановлення
-              centerY(8, 0xFFFFFF, "Installing files...")
-              local oki, ierr = install_to_target(target)
-              
-              if not oki then
-                clearScreen(0x000080)
-                centerY(10, 0xFF4444, "Installation failed!")
-                centerY(12, 0xFFAAAA, tostring(ierr))
-                centerY(14, 0xFFFFFF, "Press any key to exit.")
-                pull()
-                return
-              end
-              
-              -- Успіх
-              clearScreen(0x000080)
-              centerY(10, 0x00FF00, "Installation completed successfully!")
-              centerY(12, 0xFFFFFF, "FixOS 2000 is ready.")
-              centerY(14, 0xFFFF00, "Rebooting in 3 seconds...")
-              os.sleep(3)
-              computer.shutdown(true)
-              return
-              
-            elseif bid == "cancel" then
-              clearScreen(0x000080)
-              centerY(12, 0xFFFFFF, "Installation cancelled.")
-              os.sleep(1)
-              return
-            end
-          elseif e[1] == "key_down" then
-            if e[4] == 1 then -- ESC
-              clearScreen(0x000080)
-              centerY(12, 0xFFFFFF, "Cancelled.")
-              os.sleep(1)
-              return
-            end
-          end
+        local ok, err = prepare_disk(target)
+        if not ok then
+          clearScreen(0x000080)
+          centerY(10, 0xFF4444, "Prepare failed: " .. tostring(err))
+          os.sleep(2)
+          return
         end
+        
+        -- Встановлення
+        ok, err = install_files(target)
+        if not ok then
+          clearScreen(0x000080)
+          centerY(10, 0xFF4444, "Installation failed!")
+          centerY(12, 0xFFAAAA, tostring(err))
+          os.sleep(3)
+          return
+        end
+        
+        -- Прошивка BIOS
+        ok, err = flash_bios()
+        if not ok then
+          clearScreen(0x000080)
+          centerY(10, 0xFFFF00, "Warning: BIOS flash failed")
+          centerY(12, 0xFFAAAA, tostring(err))
+          centerY(14, 0xFFFFFF, "System installed but may not boot automatically.")
+          os.sleep(3)
+        end
+        
+        -- Успіх
+        clearScreen(0x000080)
+        draw_header("Complete")
+        centerY(9, 0x00FF00, "FixOS 2000 installed successfully!")
+        centerY(11, 0xFFFFFF, "Custom BIOS has been flashed.")
+        centerY(13, 0xFFFF00, "Rebooting in 3 seconds...")
+        os.sleep(3)
+        computer.shutdown(true)
+        return
+        
+      elseif id == "bios_only" then
+        -- Тільки прошивка BIOS
+        local ok, err = flash_bios()
+        if ok then
+          clearScreen(0x000080)
+          centerY(12, 0x00FF00, "BIOS flashed successfully!")
+          os.sleep(2)
+        else
+          clearScreen(0x000080)
+          centerY(12, 0xFF4444, "Flash failed: " .. tostring(err))
+          os.sleep(2)
+        end
+        main()
+        return
         
       elseif id == "quit" then
         clearScreen(0x000080)
@@ -549,12 +655,10 @@ local function main()
         os.sleep(1)
         return
       end
-      
     elseif ev[1] == "key_down" then
-      local key = ev[4]
-      if key == 1 then -- ESC
+      if ev[4] == 1 then -- ESC
         clearScreen(0x000080)
-        centerY(12, 0xFFFFFF, "Installer cancelled.")
+        centerY(12, 0xFFFFFF, "Cancelled.")
         os.sleep(1)
         return
       end
@@ -562,10 +666,13 @@ local function main()
   end
 end
 
--- Запуск
+-- Запуск з обробкою помилок
 local ok, err = pcall(main)
 if not ok then
-  print("Installer error: " .. tostring(err))
+  clearScreen(0x000000)
+  print("Installer Error:")
+  print(tostring(err))
+  print("")
   print("Press any key to exit.")
   pull()
 end
