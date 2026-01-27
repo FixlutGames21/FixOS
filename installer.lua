@@ -99,50 +99,49 @@ local function fetch_from_github(path)
   end
   
   local url = BASE_RAW .. "/" .. path
-  local ok, handle = pcall(internet.request, internet, url)
   
-  if not ok or not handle then
-    return nil, "Request failed: " .. tostring(handle)
+  -- internet.request повертає handle або nil, error
+  local handle, reason = internet.request(url)
+  
+  if not handle then
+    return nil, "Request failed: " .. tostring(reason)
   end
   
-  local data = ""
-  local timeout = computer.uptime() + 10 -- 10 секунд таймаут
+  -- Чекаємо поки з'явиться відповідь
+  local startTime = computer.uptime()
+  local timeout = 15
   
-  -- Обробка відповіді (handle може бути функцією або таблицею)
-  if type(handle) == "function" then
-    -- handle є ітератором
-    while true do
-      if computer.uptime() > timeout then
-        return nil, "Download timeout"
-      end
-      
-      local chunk = handle()
-      if not chunk then break end
-      data = data .. chunk
-    end
-  elseif type(handle) == "table" then
-    -- handle є таблицею з методами
-    while true do
-      if computer.uptime() > timeout then
-        if handle.close then pcall(handle.close, handle) end
-        return nil, "Download timeout"
-      end
-      
-      local chunk, err = handle.read(math.huge)
-      if not chunk then
-        if err then
-          if handle.close then pcall(handle.close, handle) end
-          return nil, "Read error: " .. tostring(err)
-        end
-        break
-      end
-      data = data .. chunk
+  local result = {}
+  
+  while true do
+    if computer.uptime() - startTime > timeout then
+      pcall(handle.close)
+      return nil, "Download timeout"
     end
     
-    if handle.close then pcall(handle.close, handle) end
+    local chunk, err = handle.read(math.huge)
+    
+    if chunk then
+      table.insert(result, chunk)
+    else
+      if err then
+        pcall(handle.close)
+        return nil, "Read error: " .. tostring(err)
+      else
+        -- chunk == nil і err == nil означає кінець файлу
+        break
+      end
+    end
+    
+    -- Невелика пауза щоб не перевантажувати процесор
+    os.sleep(0.05)
   end
   
-  if data == "" then
+  pcall(handle.close)
+  
+  local data = table.concat(result)
+  
+  if data == "" or #data == 0 then
     return nil, "Empty response"
   end
   
