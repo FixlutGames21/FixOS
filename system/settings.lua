@@ -1,13 +1,17 @@
 local gpu = require("component").gpu
 local term = require("term")
+local event = require("event")
+
+local w, h = gpu.getResolution()
+
 gpu.setBackground(0x0000AA)
-gpu.fill(1,1,80,25," ")
+gpu.fill(1, 1, w, h, " ")
 gpu.setForeground(0xFFFF00)
-term.setCursor(2,2)
-print("FixOS 2000 Settings")
-term.setCursor(2,4)
-print("No settings yet, come back later.")
-term.setCursor(2,6)
-print("Press any key to return.")
-term.read()
-dofile("/system/desktop.lua")
+gpu.set(2, 2, "FixOS 2000 Settings")
+gpu.setForeground(0xFFFFFF)
+gpu.set(2, 4, "Version: 1.0")
+gpu.set(2, 5, "Author: FixlutGames21")
+gpu.set(2, 7, "No settings available yet.")
+gpu.set(2, 9, "Press any key to return.")
+
+event.pull("key_down")

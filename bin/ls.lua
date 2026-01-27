@@ -8,7 +8,12 @@ if not fs.exists(path) then
 end
 
 if fs.isDirectory(path) then
+  local files = {}
   for file in fs.list(path) do
+    table.insert(files, file)
+  end
+  table.sort(files)
+  for _, file in ipairs(files) do
     print(file)
   end
 else
