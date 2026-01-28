@@ -1,13 +1,93 @@
--- installer.lua
--- FixOS 2000 Installer - ПОКРАЩЕНА ВЕРСІЯ
--- З кастомною прошивкою BIOS та надійним завантаженням
--- Встановлення: dofile("/home/installer.lua")
+-- ==============================================
+-- ВИПРАВЛЕНИЙ BIOS КОД ДЛЯ EEPROM
+-- ==============================================
+-- ВАЖЛИВО: BIOS не може використовувати require()!
+-- Використовуємо тільки component.proxy()
 
+local BIOS_CODE = [[
+local component_invoke = component.invoke
+local component_list = component.list
+local computer_getBootAddress = computer.getBootAddress
+local computer_setBootAddress = computer.setBootAddress
+
+-- Отримуємо компоненти без require
+local gpu = component_list("gpu")()
+local screen = component_list("screen")()
+
+-- Показуємо екран завантаження
+if gpu and screen then
+  component_invoke(gpu, "bind", screen)
+  component_invoke(gpu, "setResolution", 50, 16)
+  component_invoke(gpu, "setBackground", 0x000000)
+  component_invoke(gpu, "setForeground", 0x00FF00)
+  component_invoke(gpu, "fill", 1, 1, 50, 16, " ")
+  component_invoke(gpu, "set", 2, 2, "FixOS 2000 BIOS v1.0")
+  component_invoke(gpu, "set", 2, 4, "Booting...")
+end
+
+-- Отримуємо boot адресу з EEPROM data
+local bootAddr = component_invoke(component_list("eeprom")(), "getData")
+if not bootAddr or bootAddr == "" then
+  bootAddr = computer_getBootAddress()
+end
+
+-- Функція завантаження init.lua
+local function boot()
+  local fs = bootAddr and component_list("filesystem", bootAddr)()
+  
+  if not fs then
+    -- Якщо не знайдено, шукаємо будь-яку filesystem
+    fs = component_list("filesystem")()
+  end
+  
+  if not fs then
+    error("No filesystem found")
+  end
+  
+  -- Читаємо /boot/init.lua
+  local handle = component_invoke(fs, "open", "/boot/init.lua")
+  if not handle then
+    error("No /boot/init.lua found")
+  end
+  
+  local buffer = ""
+  repeat
+    local chunk = component_invoke(fs, "read", handle, math.huge)
+    if chunk then
+      buffer = buffer .. chunk
+    end
+  until not chunk
+  
+  component_invoke(fs, "close", handle)
+  
+  -- Виконуємо init.lua
+  local code, err = load(buffer, "=init")
+  if not code then
+    error("Boot error: " .. tostring(err))
+  end
+  
+  code()
+end
+
+-- Запускаємо
+local success, err = pcall(boot)
+if not success then
+  if gpu then
+    component_invoke(gpu, "setForeground", 0xFF0000)
+    component_invoke(gpu, "set", 2, 8, "Boot failed:")
+    component_invoke(gpu, "set", 2, 9, tostring(err))
+  end
+  error(err)
+end
+]]
+
+-- ==============================================
+-- ФАЙЛ: installer.lua - ПОВНІСТЮ ПЕРЕПИСАНИЙ
+-- ==============================================
 local component = require("component")
 local computer = require("computer")
 local filesystem = require("filesystem")
 local term = require("term")
-local unicode = _G.unicode or {}
 
 local pull = computer.pullSignal
 
@@ -19,78 +99,14 @@ local BASE_URL = string.format("https://raw.githubusercontent.com/%s/%s/%s",
                                GITHUB_USER, GITHUB_REPO, GITHUB_BRANCH)
 
 local FILES = {
-  "system/gui/win2000ui.lua",
   "system/desktop.lua",
-  "system/startmenu.lua",
-  "system/settings.lua",
-  "boot/init.lua",
-  "bin/ls.lua",
-  "bin/echo.lua",
-  "bin/cls.lua",
-  "bin/edit.lua",
-  "bin/calc.lua"
+  "system/windows.lua",
+  "boot/init.lua"
 }
 
--- BIOS код для EEPROM
-local BIOS_CODE = [[
-local component = require("component")
-local computer = require("computer")
-
-local bootAddr = component.eeprom.getData()
-local gpu = component.list("gpu")()
-local screen = component.list("screen")()
-
-if gpu and screen then
-  local g = component.proxy(gpu)
-  g.bind(screen)
-  g.setResolution(50, 16)
-  g.setBackground(0x000000)
-  g.setForeground(0x00FF00)
-  g.fill(1, 1, 50, 16, " ")
-  g.set(2, 2, "FixOS 2000 BIOS")
-  g.set(2, 4, "Booting from: " .. (bootAddr or "auto"):sub(1, 8))
-end
-
-local function tryBoot(addr)
-  local fs = component.proxy(addr)
-  if not fs then return false end
-  
-  local handle = fs.open("/boot/init.lua")
-  if not handle then return false end
-  
-  local buffer = ""
-  repeat
-    local data = fs.read(handle, math.huge)
-    buffer = buffer .. (data or "")
-  until not data
-  fs.close(handle)
-  
-  local fn, err = load(buffer, "=init")
-  if not fn then
-    error("Boot error: " .. tostring(err))
-  end
-  
-  fn()
-  return true
-end
-
--- Спроба завантаження
-local success = false
-if bootAddr then
-  success = pcall(tryBoot, bootAddr)
-end
-
-if not success then
-  local bootFS = computer.getBootAddress()
-  if bootFS then
-    success = pcall(tryBoot, bootFS)
-  end
-end
-
-if not success then
-  error("No bootable device found")
-end
-]]
+-- VERSION FILE
+local VERSION_FILE = "version.txt"
+local CURRENT_VERSION = "1.0.0"
 
 -- COMPONENTS
 local gpuAddr = component.list("gpu")()
@@ -102,11 +118,6 @@ local eepromAddr = component.list("eeprom")()
 local eeprom = eepromAddr and component.proxy(eepromAddr) or nil
 
 -- UTILS
-local function txtlen(s)
-  if unicode.len then return unicode.len(s) end
-  return #s
-end
-
 local function safeBind()
   if not gpu or not screenAddr then return false end
   pcall(gpu.bind, gpu, screenAddr, true)
@@ -157,26 +168,22 @@ end
 
 local function centerY(row, color, text)
   local w = resolution()
-  local x = math.floor(w / 2 - txtlen(text) / 2)
+  local x = math.floor(w / 2 - #text / 2)
   drawText(math.max(1, x), row, color, text)
 end
 
--- ПОКРАЩЕНЕ ЗАВАНТАЖЕННЯ З GITHUB
+-- ПОКРАЩЕНЕ ЗАВАНТАЖЕННЯ
 local function wget(url)
   if not internet then
     return nil, "No internet card"
   end
   
-  -- Retry логіка
-  local maxRetries = 3
-  local retryDelay = 1
-  
-  for attempt = 1, maxRetries do
+  for attempt = 1, 3 do
     local handle = internet.request(url)
     
     if handle then
       local result = {}
-      local deadline = computer.uptime() + 30 -- 30 секунд на файл
+      local deadline = computer.uptime() + 30
       
       while computer.uptime() < deadline do
         local chunk = handle.read(math.huge)
@@ -184,18 +191,16 @@ local function wget(url)
         if chunk then
           table.insert(result, chunk)
         else
-          -- nil означає кінець
           handle.close()
           local data = table.concat(result)
           
           if #data > 0 then
-            -- Перевірка на 404
-            if data:match("^%s*<!") or data:match("404: Not Found") then
+            if data:match("^%s*<!") or data:match("404") then
               return nil, "File not found (404)"
             end
             return data
           else
-            break -- Пуста відповідь, спробуємо ще раз
+            break
           end
         end
       end
@@ -203,18 +208,16 @@ local function wget(url)
       pcall(handle.close)
     end
     
-    -- Якщо не вдалося - чекаємо і пробуємо знову
-    if attempt < maxRetries then
-      os.sleep(retryDelay)
+    if attempt < 3 then
+      os.sleep(1)
     end
   end
   
-  return nil, "Download failed after " .. maxRetries .. " attempts"
+  return nil, "Download failed after 3 attempts"
 end
 
 local function fetch_from_github(path)
-  local url = BASE_URL .. "/" .. path
-  return wget(url)
+  return wget(BASE_URL .. "/" .. path)
 end
 
 -- Запис файлу
@@ -246,7 +249,7 @@ local function drawButton(id, x, y, w, h, bg, fg, label)
     pcall(function()
       gpu.setBackground(bg)
       gpu.fill(x, y, w, h, " ")
-      local lx = x + math.floor((w - txtlen(label)) / 2)
+      local lx = x + math.floor((w - #label) / 2)
       gpu.setForeground(fg)
       gpu.set(lx, y + math.floor(h / 2), label)
       gpu.setBackground(0x000080)
@@ -276,7 +279,7 @@ local function draw_header(title)
   end)
 end
 
--- Прошивка EEPROM
+-- Прошивка BIOS - ВИПРАВЛЕНА ВЕРСІЯ
 local function flash_bios()
   if not eeprom then
     return false, "No EEPROM found"
@@ -285,7 +288,7 @@ local function flash_bios()
   clearScreen(0x000080)
   draw_header("Flashing BIOS")
   
-  centerY(8, 0xFFFFFF, "Writing custom BIOS to EEPROM...")
+  centerY(8, 0xFFFFFF, "Writing FixOS BIOS to EEPROM...")
   centerY(10, 0xFFFF00, "Do not turn off the computer!")
   
   os.sleep(0.5)
@@ -301,7 +304,8 @@ local function flash_bios()
   end
   
   centerY(12, 0x00FF00, "BIOS flashed successfully!")
-  os.sleep(1)
+  centerY(13, 0xFFFFFF, "Computer will boot from FixOS now")
+  os.sleep(1.5)
   
   return true
 end
@@ -314,11 +318,11 @@ local function eula_gui()
   centerY(6, 0xFFFFFF, "FixOS 2000 - End User License Agreement")
   centerY(8, 0xFFFFFF, "By installing you agree to use this software")
   centerY(9, 0xFFFFFF, "for educational and entertainment purposes.")
-  centerY(11, 0xFFFFFF, "Click Accept to continue or Reject to cancel.")
+  centerY(11, 0xFFFFFF, "Press Enter to Accept or Esc to Cancel")
   
   BUTTONS = {}
-  drawButton("accept", 24, 15, 14, 3, 0x00AA00, 0xFFFFFF, "Accept")
-  drawButton("reject", 46, 15, 14, 3, 0xAA0000, 0xFFFFFF, "Reject")
+  drawButton("accept", 28, 15, 14, 3, 0x00AA00, 0xFFFFFF, "Accept")
+  drawButton("reject", 44, 15, 14, 3, 0xAA0000, 0xFFFFFF, "Cancel")
   
   while true do
     local ev = {pull(0.5)}
@@ -333,8 +337,8 @@ local function eula_gui()
         return false
       end
     elseif ev[1] == "key_down" then
-      if ev[4] == 28 then return true end -- Enter
-      if ev[4] == 1 then return false end -- Esc
+      if ev[4] == 28 then return true end
+      if ev[4] == 1 then return false end
     end
   end
 end
@@ -356,7 +360,6 @@ local function list_filesystems()
       local ok4, total = pcall(proxy.spaceTotal, proxy)
       info.spaceTotal = ok4 and total or 0
       
-      -- Фільтр: тільки великі диски
       if info.spaceTotal > 100000 and not info.label:match("tmpfs") then
         table.insert(list, info)
       end
@@ -406,7 +409,7 @@ local function choose_disk_gui()
                info.readOnly and 0x555555 or 0xCCCCCC, 0x000000, label)
   end
   
-  centerY(startY + #list * 3 + 2, 0xFFFFFF, "Click disk or press number. ESC to cancel.")
+  centerY(startY + #list * 3 + 2, 0xFFFFFF, "Click disk or press 1-9. ESC to cancel.")
   
   while true do
     local ev = {pull(0.5)}
@@ -430,9 +433,8 @@ local function choose_disk_gui()
       end
     elseif ev[1] == "key_down" then
       local key = ev[4]
-      if key == 1 then return nil end -- Esc
+      if key == 1 then return nil end
       
-      -- Цифри 1-9
       if key >= 2 and key <= 10 then
         local idx = key - 1
         if list[idx] and not list[idx].readOnly then
@@ -447,7 +449,7 @@ end
 local function prepare_disk(addr)
   local currentRoot = filesystem.get("/")
   if currentRoot and currentRoot.address == addr then
-    return true -- Поточний диск
+    return true
   end
   
   local proxy = component.proxy(addr)
@@ -455,8 +457,7 @@ local function prepare_disk(addr)
     return false, "Cannot access disk"
   end
   
-  -- Видаляємо старі файли FixOS
-  local dirs = {"system", "boot", "bin"}
+  local dirs = {"system", "boot"}
   for _, dir in ipairs(dirs) do
     pcall(proxy.remove, "/" .. dir)
   end
@@ -467,17 +468,14 @@ end
 -- Встановлення файлів
 local function install_files(targetAddr)
   local total = #FILES
-  local installed = 0
   
   for i, rel in ipairs(FILES) do
-    -- Показуємо прогрес
     clearScreen(0x000080)
     draw_header("Installing FixOS 2000")
     
     centerY(7, 0xFFFFFF, string.format("File %d/%d", i, total))
     centerY(8, 0xAAAAAA, rel)
     
-    -- Прогрес бар
     local pct = (i - 1) / total
     local barW = math.floor(pct * 60)
     if gpu then
@@ -491,7 +489,6 @@ local function install_files(targetAddr)
     end
     centerY(13, 0xFFFFFF, string.format("%.0f%%", pct * 100))
     
-    -- Завантаження
     centerY(15, 0xFFFF00, "Downloading...")
     local data, err = fetch_from_github(rel)
     
@@ -501,7 +498,6 @@ local function install_files(targetAddr)
       return false, "Download failed: " .. rel
     end
     
-    -- Запис
     centerY(15, 0xFFFF00, "Writing to disk...    ")
     local ok, werr = write_file("/" .. rel, data)
     
@@ -511,11 +507,12 @@ local function install_files(targetAddr)
       return false, "Write failed: " .. rel
     end
     
-    installed = installed + 1
     os.sleep(0.1)
   end
   
-  -- Фінальний прогрес
+  -- Створюємо version.txt
+  write_file("/version.txt", CURRENT_VERSION)
+  
   clearScreen(0x000080)
   draw_header("Installing FixOS 2000")
   centerY(10, 0x00FF00, "All files installed successfully!")
@@ -530,7 +527,6 @@ local function install_files(targetAddr)
   centerY(14, 0xFFFFFF, "100%")
   os.sleep(1)
   
-  -- Налаштування EEPROM
   if eeprom and targetAddr then
     centerY(16, 0xFFFF00, "Configuring boot device...")
     pcall(eeprom.setData, targetAddr)
@@ -542,7 +538,6 @@ end
 
 -- Головна функція
 local function main()
-  -- Перевірка інтернету
   if not internet then
     print("ERROR: Internet Card required!")
     print("Install an Internet Card and try again.")
@@ -558,14 +553,16 @@ local function main()
   draw_header("Welcome")
   
   centerY(5, 0xFFFFFF, "Welcome to FixOS 2000 Installer")
-  centerY(7, 0xAAAAAA, "Version 1.0 - Classic Edition")
-  centerY(9, 0xFFFFFF, "This will install FixOS on your computer")
-  centerY(10, 0xFFFFFF, "and flash a custom BIOS to EEPROM.")
+  centerY(7, 0xAAAAAA, "Version 1.0 - Windowed Edition")
+  centerY(9, 0xFFFFFF, "This will install FixOS with:")
+  centerY(10, 0xFFFFFF, "- Windowed interface")
+  centerY(11, 0xFFFFFF, "- System update support")
+  centerY(12, 0xFFFFFF, "- Custom BIOS")
   
   BUTTONS = {}
-  drawButton("install", 25, 14, 20, 3, 0x00AA00, 0xFFFFFF, "Install")
-  drawButton("bios_only", 25, 18, 20, 3, 0x0088FF, 0xFFFFFF, "Flash BIOS Only")
-  drawButton("quit", 25, 22, 20, 3, 0xAA0000, 0xFFFFFF, "Exit")
+  drawButton("install", 25, 16, 20, 3, 0x00AA00, 0xFFFFFF, "Install")
+  drawButton("bios_only", 25, 20, 20, 3, 0x0088FF, 0xFFFFFF, "Flash BIOS Only")
+  drawButton("quit", 25, 24, 20, 3, 0xAA0000, 0xFFFFFF, "Exit")
   
   while true do
     local ev = {pull(0.5)}
@@ -575,7 +572,6 @@ local function main()
       local id = hitButton(x, y)
       
       if id == "install" then
-        -- Повна інсталяція
         if not eula_gui() then
           clearScreen(0x000080)
           centerY(12, 0xFFFFFF, "Installation cancelled.")
@@ -591,7 +587,6 @@ local function main()
           return
         end
         
-        -- Підготовка
         clearScreen(0x000080)
         draw_header("Preparing")
         centerY(10, 0xFFFFFF, "Preparing disk...")
@@ -604,7 +599,6 @@ local function main()
           return
         end
         
-        -- Встановлення
         ok, err = install_files(target)
         if not ok then
           clearScreen(0x000080)
@@ -614,17 +608,15 @@ local function main()
           return
         end
         
-        -- Прошивка BIOS
         ok, err = flash_bios()
         if not ok then
           clearScreen(0x000080)
           centerY(10, 0xFFFF00, "Warning: BIOS flash failed")
           centerY(12, 0xFFAAAA, tostring(err))
-          centerY(14, 0xFFFFFF, "System installed but may not boot automatically.")
+          centerY(14, 0xFFFFFF, "System installed but may not boot.")
           os.sleep(3)
         end
         
-        -- Успіх
         clearScreen(0x000080)
         draw_header("Complete")
         centerY(9, 0x00FF00, "FixOS 2000 installed successfully!")
@@ -635,7 +627,6 @@ local function main()
         return
         
       elseif id == "bios_only" then
-        -- Тільки прошивка BIOS
         local ok, err = flash_bios()
         if ok then
           clearScreen(0x000080)
@@ -656,7 +647,7 @@ local function main()
         return
       end
     elseif ev[1] == "key_down" then
-      if ev[4] == 1 then -- ESC
+      if ev[4] == 1 then
         clearScreen(0x000080)
         centerY(12, 0xFFFFFF, "Cancelled.")
         os.sleep(1)
@@ -666,7 +657,6 @@ local function main()
   end
 end
 
--- Запуск з обробкою помилок
 local ok, err = pcall(main)
 if not ok then
   clearScreen(0x000000)

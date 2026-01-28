@@ -1,12 +1,11 @@
 -- ==============================================
 -- ФАЙЛ: system/desktop.lua
--- Windows 2000 Style Desktop з іконками та панеллю задач
+-- Windows 2000 з віконним менеджером
 -- ==============================================
 local component = require("component")
 local computer = require("computer")
-local term = require("term")
 local event = require("event")
-local shell = require("shell")
+local unicode = require("unicode")
 
 if not component.isAvailable("gpu") then
   print("ERROR: No GPU available!")
@@ -20,123 +19,203 @@ w, h = gpu.getResolution()
 
 -- Кольори Windows 2000
 local COLORS = {
-  desktop = 0x008080,      -- Teal desktop
-  taskbar = 0xC0C0C0,      -- Gray taskbar
-  taskbarDark = 0x808080,  -- Dark gray border
-  startBtn = 0x00AA00,     -- Green Start button
-  startBtnText = 0xFFFFFF, -- White text
-  iconBg = 0x008080,       -- Same as desktop
-  iconText = 0xFFFFFF,     -- White text
-  iconSelected = 0x000080, -- Navy blue when selected
-  windowTitle = 0x000080,  -- Navy blue
-  windowBg = 0xC0C0C0,     -- Gray
+  desktop = 0x008080,
+  taskbar = 0xC0C0C0,
+  taskbarDark = 0x808080,
+  startBtn = 0x00AA00,
+  startBtnText = 0xFFFFFF,
+  iconBg = 0x008080,
+  iconText = 0xFFFFFF,
+  iconSelected = 0x000080,
+  windowTitle = 0x000080,
+  windowBg = 0xC0C0C0,
   white = 0xFFFFFF,
-  black = 0x000000
+  black = 0x000000,
+  btnFace = 0xC0C0C0,
+  btnHighlight = 0xFFFFFF,
+  btnShadow = 0x808080,
+  btnDarkShadow = 0x404040
 }
 
 -- Іконки на робочому столі
 local ICONS = {
-  {x = 2, y = 2, w = 10, h = 3, label = "My Computer", action = "mycomputer"},
-  {x = 2, y = 6, w = 10, h = 3, label = "Calculator", action = "calc"},
-  {x = 2, y = 10, w = 10, h = 3, label = "Text Editor", action = "edit"},
-  {x = 2, y = 14, w = 10, h = 3, label = "Terminal", action = "terminal"},
-  {x = 2, y = 18, w = 10, h = 3, label = "Settings", action = "settings"}
+  {x = 2, y = 2, w = 12, h = 4, label = "My Computer", icon = "[PC]", action = "mycomputer"},
+  {x = 2, y = 7, w = 12, h = 4, label = "Calculator", icon = "[=]", action = "calc"},
+  {x = 2, y = 12, w = 12, h = 4, label = "Notepad", icon = "[N]", action = "notepad"},
+  {x = 2, y = 17, w = 12, h = 4, label = "Settings", icon = "[*]", action = "settings"}
 }
 
 local selectedIcon = nil
 local startMenuOpen = false
+local activeWindows = {}
+local focusedWindow = nil
+local dragWindow = nil
+local dragOffsetX, dragOffsetY = 0, 0
 local clockTimer = 0
+
+-- Завантаження модулів вікон
+local windowModules = dofile("/system/windows.lua")
+
+-- Малювання 3D рамки
+local function draw3DFrame(x, y, w, h, raised)
+  if raised then
+    gpu.setForeground(COLORS.btnHighlight)
+    for i = 0, w - 1 do gpu.set(x + i, y, "─") end
+    for i = 0, h - 1 do gpu.set(x, y + i, "│") end
+    
+    gpu.setForeground(COLORS.btnShadow)
+    for i = 0, w - 1 do gpu.set(x + i, y + h - 1, "─") end
+    for i = 0, h - 1 do gpu.set(x + w - 1, y + i, "│") end
+  else
+    gpu.setForeground(COLORS.btnShadow)
+    for i = 0, w - 1 do gpu.set(x + i, y, "─") end
+    for i = 0, h - 1 do gpu.set(x, y + i, "│") end
+    
+    gpu.setForeground(COLORS.btnHighlight)
+    for i = 0, w - 1 do gpu.set(x + i, y + h - 1, "─") end
+    for i = 0, h - 1 do gpu.set(x + w - 1, y + i, "│") end
+  end
+end
 
 -- Малювання іконки
 local function drawIcon(icon, selected)
   local bg = selected and COLORS.iconSelected or COLORS.iconBg
   local fg = COLORS.iconText
   
-  gpu.setBackground(bg)
   if selected then
+    gpu.setBackground(bg)
     gpu.fill(icon.x, icon.y, icon.w, icon.h, " ")
   end
   
   gpu.setForeground(fg)
   
-  -- Малюємо іконку (простий ASCII арт)
-  local iconChar = "[]"
-  if icon.action == "calc" then iconChar = "[=]"
-  elseif icon.action == "edit" then iconChar = "[T]"
-  elseif icon.action == "terminal" then iconChar = "[>]"
-  elseif icon.action == "settings" then iconChar = "[*]"
-  elseif icon.action == "mycomputer" then iconChar = "[C]"
-  end
+  -- Іконка
+  local iconX = icon.x + math.floor(icon.w / 2) - math.floor(unicode.len(icon.icon) / 2)
+  gpu.set(iconX, icon.y + 1, icon.icon)
   
-  local iconX = icon.x + math.floor(icon.w / 2) - 1
-  gpu.set(iconX, icon.y, iconChar)
-  
-  -- Текст під іконкою
-  local textX = icon.x + math.floor((icon.w - #icon.label) / 2)
-  gpu.set(textX, icon.y + 2, icon.label)
+  -- Текст
+  local textX = icon.x + math.floor((icon.w - unicode.len(icon.label)) / 2)
+  gpu.set(textX, icon.y + 3, icon.label)
   
   gpu.setBackground(COLORS.desktop)
 end
 
--- Малювання панелі задач (taskbar)
+-- Малювання панелі задач
 local function drawTaskbar()
-  -- Основна панель
   gpu.setBackground(COLORS.taskbar)
   gpu.fill(1, h, w, 1, " ")
   
-  -- Тінь зверху
-  gpu.setBackground(COLORS.taskbarDark)
-  gpu.fill(1, h, w, 1, "▀")
-  
-  gpu.setBackground(COLORS.taskbar)
+  -- Верхня рамка
+  gpu.setForeground(COLORS.btnHighlight)
+  for i = 1, w do gpu.set(i, h, "▀") end
   
   -- Кнопка Start
   gpu.setBackground(COLORS.startBtn)
   gpu.setForeground(COLORS.startBtnText)
-  gpu.fill(1, h, 8, 1, " ")
-  gpu.set(2, h, "Start")
+  gpu.fill(2, h, 9, 1, " ")
+  gpu.set(3, h, "⊞ Start")
   
   -- Роздільник
-  gpu.setBackground(COLORS.taskbarDark)
-  gpu.set(9, h, "│")
+  gpu.setBackground(COLORS.taskbar)
+  gpu.setForeground(COLORS.btnShadow)
+  gpu.set(12, h, "│")
   
-  -- Годинник справа
+  -- Кнопки вікон
+  local btnX = 14
+  for i, win in ipairs(activeWindows) do
+    if btnX + 15 < w - 7 then
+      local isFocused = (focusedWindow == i)
+      gpu.setBackground(isFocused and COLORS.taskbarDark or COLORS.taskbar)
+      gpu.setForeground(COLORS.black)
+      gpu.fill(btnX, h, 15, 1, " ")
+      local title = win.title
+      if unicode.len(title) > 12 then title = unicode.sub(title, 1, 12) .. "..." end
+      gpu.set(btnX + 1, h, title)
+      btnX = btnX + 16
+    end
+  end
+  
+  -- Годинник
   gpu.setBackground(COLORS.taskbar)
   gpu.setForeground(COLORS.black)
   local time = os.date("%H:%M")
-  gpu.set(w - 5, h, time)
+  gpu.set(w - 6, h, time)
 end
 
--- Малювання всього робочого столу
+-- Малювання робочого столу
 local function drawDesktop()
-  -- Фон робочого столу
   gpu.setBackground(COLORS.desktop)
   gpu.fill(1, 1, w, h - 1, " ")
   
-  -- Іконки
   for i, icon in ipairs(ICONS) do
     drawIcon(icon, selectedIcon == i)
   end
   
-  -- Панель задач
   drawTaskbar()
-  
-  -- Закриваємо меню Пуск якщо було відкрите
   startMenuOpen = false
 end
 
+-- Малювання вікна
+local function drawWindow(win)
+  local wx, wy, ww, wh = win.x, win.y, win.w, win.h
+  
+  -- Тінь
+  gpu.setBackground(COLORS.black)
+  gpu.fill(wx + 1, wy + 1, ww, wh, " ")
+  
+  -- Фон вікна
+  gpu.setBackground(COLORS.windowBg)
+  gpu.fill(wx, wy, ww, wh, " ")
+  
+  -- Заголовок
+  local isFocused = (activeWindows[focusedWindow] == win)
+  gpu.setBackground(isFocused and COLORS.windowTitle or COLORS.btnShadow)
+  gpu.setForeground(COLORS.white)
+  gpu.fill(wx, wy, ww, 1, " ")
+  
+  local title = win.title or "Window"
+  if unicode.len(title) > ww - 6 then
+    title = unicode.sub(title, 1, ww - 9) .. "..."
+  end
+  gpu.set(wx + 1, wy, title)
+  
+  -- Кнопки вікна
+  gpu.set(wx + ww - 4, wy, "[_]")
+  gpu.set(wx + ww - 2, wy, "[X]")
+  
+  -- Рамка
+  gpu.setBackground(COLORS.windowBg)
+  draw3DFrame(wx, wy + 1, ww, wh - 1, true)
+  
+  -- Вміст вікна
+  if win.draw then
+    win:draw(gpu, wx + 1, wy + 2, ww - 2, wh - 3)
+  end
+end
+
+-- Малювання всіх вікон
+local function redrawAll()
+  drawDesktop()
+  for i, win in ipairs(activeWindows) do
+    drawWindow(win)
+  end
+  if startMenuOpen then
+    drawStartMenu()
+  end
+end
+
 -- Малювання меню Пуск
-local function drawStartMenu()
-  local menuW = 25
-  local menuH = 12
-  local menuX = 1
+function drawStartMenu()
+  local menuW = 28
+  local menuH = 14
+  local menuX = 2
   local menuY = h - menuH - 1
   
   -- Тінь
-  gpu.setBackground(COLORS.taskbarDark)
+  gpu.setBackground(COLORS.black)
   gpu.fill(menuX + 1, menuY + 1, menuW, menuH, " ")
   
-  -- Основне вікно меню
+  -- Вікно меню
   gpu.setBackground(COLORS.windowBg)
   gpu.fill(menuX, menuY, menuW, menuH, " ")
   
@@ -144,143 +223,187 @@ local function drawStartMenu()
   gpu.setBackground(COLORS.windowTitle)
   gpu.setForeground(COLORS.white)
   gpu.fill(menuX, menuY, menuW, 2, " ")
-  gpu.set(menuX + 1, menuY, " FixOS 2000")
+  gpu.set(menuX + 1, menuY + 1, " FixOS 2000")
   
   -- Пункти меню
   gpu.setBackground(COLORS.windowBg)
   gpu.setForeground(COLORS.black)
   
-  local menuItems = {
-    {y = menuY + 3, text = " Programs", action = "programs"},
-    {y = menuY + 4, text = " Documents", action = "docs"},
-    {y = menuY + 5, text = " Settings", action = "settings"},
-    {y = menuY + 6, text = " Search", action = "search"},
-    {y = menuY + 7, text = " Help", action = "help"},
-    {y = menuY + 8, text = " Run...", action = "run"},
-    {y = menuY + 10, text = " Shut Down...", action = "shutdown"}
+  local items = {
+    {y = 3, text = " ► Programs", action = "programs"},
+    {y = 4, text = " ► Documents", action = "docs"},
+    {y = 5, text = " ► Settings", action = "settings"},
+    {y = 7, text = " ► Search", action = "search"},
+    {y = 8, text = " ► Help", action = "help"},
+    {y = 9, text = " ► Run...", action = "run"},
+    {y = 11, text = " ⊗ Shut Down", action = "shutdown"}
   }
   
-  for _, item in ipairs(menuItems) do
-    gpu.set(menuX + 1, item.y, item.text)
+  for _, item in ipairs(items) do
+    gpu.set(menuX + 2, menuY + item.y, item.text)
   end
   
   -- Роздільник
-  gpu.set(menuX, menuY + 9, "─")
-  for i = 2, menuW - 1 do
-    gpu.set(menuX + i - 1, menuY + 9, "─")
+  gpu.setForeground(COLORS.btnShadow)
+  for i = 0, menuW - 1 do
+    gpu.set(menuX + i, menuY + 6, "─")
+    gpu.set(menuX + i, menuY + 10, "─")
   end
   
   startMenuOpen = true
-  return menuItems
+  return items, menuX, menuY
 end
 
--- Перевірка кліку на іконку
+-- Перевірки кліків
 local function checkIconClick(x, y)
   for i, icon in ipairs(ICONS) do
     if x >= icon.x and x < icon.x + icon.w and
-       y >= icon.y and y < icon.y + icon.h then
+       y >= icon.y and y < icon.y + icon.h and y < h - 1 then
       return i
     end
   end
   return nil
 end
 
--- Перевірка кліку на кнопку Start
 local function checkStartButton(x, y)
-  return y == h and x >= 1 and x <= 8
+  return y == h and x >= 2 and x <= 10
 end
 
--- Перевірка кліку на меню Пуск
+local function checkWindowClick(x, y)
+  for i = #activeWindows, 1, -1 do
+    local win = activeWindows[i]
+    if x >= win.x and x < win.x + win.w and
+       y >= win.y and y < win.y + win.h then
+      return i, win
+    end
+  end
+  return nil, nil
+end
+
 local function checkStartMenuClick(x, y)
-  local menuY = h - 13
-  local menuItems = {
-    {y = menuY + 3, action = "programs"},
-    {y = menuY + 4, action = "docs"},
-    {y = menuY + 5, action = "settings"},
-    {y = menuY + 6, action = "search"},
-    {y = menuY + 7, action = "help"},
-    {y = menuY + 8, action = "run"},
-    {y = menuY + 10, action = "shutdown"}
-  }
+  if not startMenuOpen then return nil end
+  local items, menuX, menuY = drawStartMenu()
+  startMenuOpen = false  -- Reset
+  startMenuOpen = true   -- Set back
   
-  for _, item in ipairs(menuItems) do
-    if y == item.y and x >= 1 and x <= 25 then
+  for _, item in ipairs(items) do
+    if y == menuY + item.y and x >= menuX and x < menuX + 28 then
       return item.action
     end
   end
   return nil
 end
 
--- Виконання дії іконки
-local function executeIconAction(action)
-  gpu.setBackground(COLORS.black)
-  gpu.setForeground(COLORS.white)
-  term.clear()
-  
-  if action == "calc" then
-    dofile("/bin/calc.lua")
-  elseif action == "edit" then
-    dofile("/bin/edit.lua")
-  elseif action == "terminal" then
-    shell.execute("sh")
-  elseif action == "settings" then
-    dofile("/system/settings.lua")
-  elseif action == "mycomputer" then
-    -- My Computer - показуємо список дисків
-    print("FixOS 2000 - My Computer")
-    print("")
-    for addr in component.list("filesystem") do
-      local proxy = component.proxy(addr)
-      local label = proxy.getLabel() or "Unnamed"
-      print(label .. " (" .. addr:sub(1, 8) .. ")")
+local function checkTaskbarWindowClick(x, y)
+  if y ~= h then return nil end
+  local btnX = 14
+  for i, win in ipairs(activeWindows) do
+    if x >= btnX and x < btnX + 15 then
+      return i
     end
-    print("")
-    print("Press any key to return...")
-    event.pull("key_down")
+    btnX = btnX + 16
   end
-  
-  drawDesktop()
+  return nil
 end
 
--- Виконання дії меню Пуск
+-- Створення вікна
+local function createWindow(title, width, height, windowModule)
+  local winX = math.floor((w - width) / 2) + #activeWindows * 2
+  local winY = math.floor((h - height) / 2) + #activeWindows * 2
+  
+  if winY + height > h - 1 then winY = 3 end
+  if winX + width > w then winX = 3 end
+  
+  local win = {
+    title = title,
+    x = winX,
+    y = winY,
+    w = width,
+    h = height,
+    module = windowModule
+  }
+  
+  if windowModule and windowModule.init then
+    windowModule.init(win)
+  end
+  
+  function win:draw(gpu, x, y, w, h)
+    if self.module and self.module.draw then
+      self.module.draw(self, gpu, x, y, w, h)
+    end
+  end
+  
+  function win:click(x, y, button)
+    if self.module and self.module.click then
+      return self.module.click(self, x, y, button)
+    end
+  end
+  
+  function win:key(char, code)
+    if self.module and self.module.key then
+      return self.module.key(self, char, code)
+    end
+  end
+  
+  table.insert(activeWindows, win)
+  focusedWindow = #activeWindows
+  return win
+end
+
+-- Закриття вікна
+local function closeWindow(index)
+  if activeWindows[index] then
+    table.remove(activeWindows, index)
+    if focusedWindow == index then
+      focusedWindow = #activeWindows
+    elseif focusedWindow > index then
+      focusedWindow = focusedWindow - 1
+    end
+  end
+end
+
+-- Фокусування вікна
+local function focusWindow(index)
+  if index and activeWindows[index] then
+    local win = table.remove(activeWindows, index)
+    table.insert(activeWindows, win)
+    focusedWindow = #activeWindows
+  end
+end
+
+-- Виконання дії іконки
+local function executeIconAction(action)
+  if action == "calc" then
+    createWindow("Calculator", 40, 22, windowModules.calculator)
+  elseif action == "notepad" then
+    createWindow("Notepad", 60, 20, windowModules.notepad)
+  elseif action == "settings" then
+    createWindow("Settings", 50, 18, windowModules.settings)
+  elseif action == "mycomputer" then
+    createWindow("My Computer", 55, 16, windowModules.mycomputer)
+  end
+  redrawAll()
+end
+
+-- Виконання дії меню
 local function executeMenuAction(action)
   if action == "shutdown" then
     gpu.setBackground(COLORS.black)
     gpu.setForeground(COLORS.white)
-    term.clear()
-    print("FixOS 2000 is shutting down...")
+    gpu.fill(1, 1, w, h, " ")
+    gpu.set(math.floor(w/2) - 10, math.floor(h/2), "Shutting down...")
     os.sleep(1)
     computer.shutdown()
   elseif action == "settings" then
-    gpu.setBackground(COLORS.black)
-    term.clear()
-    dofile("/system/settings.lua")
-    drawDesktop()
+    createWindow("Settings", 50, 18, windowModules.settings)
   elseif action == "run" then
-    gpu.setBackground(COLORS.black)
-    term.clear()
-    print("Run Program")
-    print("")
-    io.write("Enter command: ")
-    local cmd = io.read()
-    if cmd and cmd ~= "" then
-      shell.execute(cmd)
-    end
-    drawDesktop()
+    -- TODO: Run dialog
   elseif action == "programs" then
-    drawDesktop()
-    -- Підменю Programs
-    local subMenuY = h - 13
-    gpu.setBackground(COLORS.windowBg)
-    gpu.fill(26, subMenuY + 3, 20, 5, " ")
-    gpu.setForeground(COLORS.black)
-    gpu.set(27, subMenuY + 3, " Calculator")
-    gpu.set(27, subMenuY + 4, " Text Editor")
-    gpu.set(27, subMenuY + 5, " Terminal")
-  else
-    -- Для інших пунктів просто закриваємо меню
-    drawDesktop()
+    -- Submenu з програмами
+    executeIconAction("calc")
   end
+  startMenuOpen = false
+  redrawAll()
 end
 
 -- Оновлення годинника
@@ -290,7 +413,7 @@ local function updateClock()
     gpu.setBackground(COLORS.taskbar)
     gpu.setForeground(COLORS.black)
     local time = os.date("%H:%M")
-    gpu.set(w - 5, h, time)
+    gpu.set(w - 6, h, time)
   end
 end
 
@@ -302,90 +425,113 @@ local function main()
     local eventData = {event.pull(0.5)}
     local eventType = eventData[1]
     
-    -- Оновлення годинника
     updateClock()
     
-    if eventType == "touch" then
+    if eventType == "touch" or eventType == "drag" then
       local _, _, x, y, button = table.unpack(eventData)
       
-      if startMenuOpen then
-        -- Якщо меню відкрите
-        local menuAction = checkStartMenuClick(x, y)
-        if menuAction then
-          executeMenuAction(menuAction)
-          startMenuOpen = false
-        else
-          -- Клік поза меню - закриваємо його
-          drawDesktop()
-        end
-      else
-        -- Перевірка кнопки Start
-        if checkStartButton(x, y) then
-          drawStartMenu()
-        else
-          -- Перевірка кліку на іконку
-          local iconIndex = checkIconClick(x, y)
-          if iconIndex then
-            if selectedIcon == iconIndex then
-              -- Подвійний клік - запускаємо
-              executeIconAction(ICONS[iconIndex].action)
-              selectedIcon = nil
-            else
-              -- Одинарний клік - виділяємо
-              selectedIcon = iconIndex
-              drawDesktop()
-            end
+      if eventType == "touch" then
+        if startMenuOpen then
+          local action = checkStartMenuClick(x, y)
+          if action then
+            executeMenuAction(action)
           else
-            -- Клік на пусте місце - знімаємо виділення
-            if selectedIcon then
-              selectedIcon = nil
-              drawDesktop()
+            startMenuOpen = false
+            redrawAll()
+          end
+        elseif checkStartButton(x, y) then
+          startMenuOpen = not startMenuOpen
+          redrawAll()
+        else
+          local winIndex, win = checkWindowClick(x, y)
+          
+          if winIndex then
+            focusWindow(winIndex)
+            
+            -- Перевірка кнопки закриття
+            if y == win.y and x >= win.x + win.w - 2 and x <= win.x + win.w - 1 then
+              closeWindow(#activeWindows)
+              redrawAll()
+            elseif y == win.y and x >= win.x and x < win.x + win.w - 6 then
+              -- Початок перетягування
+              dragWindow = win
+              dragOffsetX = x - win.x
+              dragOffsetY = y - win.y
+            else
+              -- Клік всередині вікна
+              local relX = x - win.x - 1
+              local relY = y - win.y - 2
+              if win.click then
+                local needRedraw = win:click(relX, relY, button)
+                if needRedraw then redrawAll() end
+              end
+            end
+            
+            redrawAll()
+          else
+            -- Клік на taskbar кнопку вікна
+            local taskWin = checkTaskbarWindowClick(x, y)
+            if taskWin then
+              focusWindow(taskWin)
+              redrawAll()
+            else
+              -- Клік на іконку
+              local iconIndex = checkIconClick(x, y)
+              if iconIndex then
+                if selectedIcon == iconIndex then
+                  executeIconAction(ICONS[iconIndex].action)
+                  selectedIcon = nil
+                else
+                  selectedIcon = iconIndex
+                  redrawAll()
+                end
+              else
+                selectedIcon = nil
+                redrawAll()
+              end
             end
           end
         end
+      elseif eventType == "drag" and dragWindow then
+        dragWindow.x = x - dragOffsetX
+        dragWindow.y = y - dragOffsetY
+        
+        -- Обмеження
+        if dragWindow.x < 0 then dragWindow.x = 0 end
+        if dragWindow.y < 1 then dragWindow.y = 1 end
+        if dragWindow.x + dragWindow.w > w then dragWindow.x = w - dragWindow.w end
+        if dragWindow.y + dragWindow.h > h - 1 then dragWindow.y = h - 1 - dragWindow.h end
+        
+        redrawAll()
       end
-      
+    elseif eventType == "drop" then
+      dragWindow = nil
     elseif eventType == "key_down" then
       local _, _, char, code = table.unpack(eventData)
       
-      -- Гарячі клавіші
-      if code == 31 then -- S key - Start menu
-        if startMenuOpen then
-          drawDesktop()
-        else
-          drawStartMenu()
+      if code == 31 then -- S
+        startMenuOpen = not startMenuOpen
+        redrawAll()
+      elseif code == 45 then -- X
+        executeMenuAction("shutdown")
+      elseif focusedWindow and activeWindows[focusedWindow] then
+        local win = activeWindows[focusedWindow]
+        if win.key then
+          local needRedraw = win:key(char, code)
+          if needRedraw then redrawAll() end
         end
-      elseif code == 45 then -- X key - Shutdown
-        gpu.setBackground(COLORS.black)
-        gpu.setForeground(COLORS.white)
-        term.clear()
-        print("FixOS 2000 is shutting down...")
-        os.sleep(1)
-        computer.shutdown()
-      elseif code == 28 and selectedIcon then -- Enter - відкрити виділену іконку
-        executeIconAction(ICONS[selectedIcon].action)
-        selectedIcon = nil
-      elseif code == 200 and selectedIcon and selectedIcon > 1 then -- Up arrow
-        selectedIcon = selectedIcon - 1
-        drawDesktop()
-      elseif code == 208 and selectedIcon and selectedIcon < #ICONS then -- Down arrow
-        selectedIcon = selectedIcon + 1
-        drawDesktop()
       end
     end
   end
 end
 
--- Запуск з обробкою помилок
 local ok, err = pcall(main)
 if not ok then
   gpu.setBackground(0x000000)
   gpu.setForeground(0xFF0000)
-  term.clear()
-  print("Desktop Error:")
-  print(tostring(err))
-  print("")
-  print("Press any key to shutdown...")
+  gpu.fill(1, 1, w, h, " ")
+  gpu.set(2, 2, "Desktop Error:")
+  gpu.set(2, 3, tostring(err))
   event.pull("key_down")
   computer.shutdown()
 end
