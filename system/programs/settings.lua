@@ -1,3 +1,8 @@
+-- ==============================================
+-- FixOS 2.0 - Settings Program
+-- system/programs/settings.lua
+-- ==============================================
+
 local settings = {}
 
 function settings.init(win)
@@ -19,7 +24,6 @@ function settings.draw(win, gpu, x, y, w, h)
     gpu.setForeground(0x000000)
     gpu.fill(tabX, y, 13, 2, " ")
     
-    -- 3D рамка вкладки
     if isActive then
       gpu.setForeground(0xFFFFFF)
       for k = 0, 12 do gpu.set(tabX + k, y, "▀") end
@@ -37,8 +41,8 @@ function settings.draw(win, gpu, x, y, w, h)
   
   if win.selectedTab == 1 then
     -- System Info
-    gpu.set(x + 2, y + 5, "Operating System: FixOS 2000")
-    gpu.set(x + 2, y + 6, "Version: 1.0 Windowed Edition")
+    gpu.set(x + 2, y + 5, "Operating System: FixOS 2.0")
+    gpu.set(x + 2, y + 6, "Version: 1.0.0")
     gpu.set(x + 2, y + 7, "Author: FixlutGames21")
     
     local component = require("component")
@@ -59,7 +63,8 @@ function settings.draw(win, gpu, x, y, w, h)
     local cy = y + 13
     for name in component.list() do
       if cy < y + h - 1 then
-        gpu.set(x + 3, cy, "- " .. name)
+        local shortName = name:sub(1, w - 6)
+        gpu.set(x + 3, cy, "- " .. shortName)
         cy = cy + 1
       end
     end
@@ -68,19 +73,20 @@ function settings.draw(win, gpu, x, y, w, h)
     -- Update Tab
     gpu.set(x + 2, y + 5, "System Update Manager")
     
-    -- Статус
     gpu.setBackground(0xE0E0E0)
     gpu.fill(x + 2, y + 7, w - 4, 2, " ")
     gpu.setForeground(0x000000)
     gpu.set(x + 3, y + 8, "Status: " .. win.updateStatus)
     
-    -- Прогрес
     if win.updateProgress ~= "" then
       gpu.setBackground(0xFFFFFF)
-      gpu.set(x + 3, y + 10, win.updateProgress)
+      local progressText = win.updateProgress
+      if #progressText > w - 6 then
+        progressText = progressText:sub(1, w - 9) .. "..."
+      end
+      gpu.set(x + 3, y + 10, progressText)
     end
     
-    -- Кнопки
     local btnY = y + 12
     
     -- Check Updates Button
@@ -112,25 +118,23 @@ function settings.draw(win, gpu, x, y, w, h)
     gpu.setForeground(0xFFFFFF)
     gpu.set(x + 5, btnY + 1, "Install Updates")
     
-    -- Info
     gpu.setBackground(0xFFFFFF)
     gpu.setForeground(0x808080)
-    gpu.set(x + 2, y + h - 2, "Note: Requires Internet Card")
+    gpu.set(x + 2, y + h - 2, "Requires Internet Card")
     
   elseif win.selectedTab == 3 then
     -- About
-    gpu.set(x + 2, y + 5, "FixOS 2000 Windowed Edition")
-    gpu.set(x + 2, y + 7, "A Windows 2000 style operating system")
-    gpu.set(x + 2, y + 8, "for OpenComputers mod in Minecraft")
+    gpu.set(x + 2, y + 5, "FixOS 2.0")
+    gpu.set(x + 2, y + 7, "A Windows 2000 style OS")
+    gpu.set(x + 2, y + 8, "for OpenComputers")
     
     gpu.set(x + 2, y + 10, "(c) 2024 FixlutGames21")
     
     gpu.set(x + 2, y + 12, "Features:")
-    gpu.set(x + 3, y + 13, "- Windowed GUI interface")
-    gpu.set(x + 3, y + 14, "- Draggable windows")
-    gpu.set(x + 3, y + 15, "- System update support")
-    gpu.set(x + 3, y + 16, "- Calculator & Notepad")
-    gpu.set(x + 3, y + 17, "- Custom BIOS")
+    gpu.set(x + 3, y + 13, "- Windowed interface")
+    gpu.set(x + 3, y + 14, "- Modular programs")
+    gpu.set(x + 3, y + 15, "- System updates")
+    gpu.set(x + 3, y + 16, "- Easy to customize")
   end
 end
 
@@ -147,13 +151,11 @@ function settings.click(win, x, y, button)
   
   -- Кнопки оновлення
   if win.selectedTab == 2 and not win.checkingUpdate and not win.installingUpdate then
-    -- Check Updates
     if x >= 2 and x < 22 and y >= 12 and y < 15 then
       settings.checkUpdates(win)
       return true
     end
     
-    -- Install Updates
     if x >= 2 and x < 22 and y >= 16 and y < 19 then
       settings.installUpdates(win)
       return true
@@ -165,13 +167,12 @@ end
 
 function settings.checkUpdates(win)
   win.checkingUpdate = true
-  win.updateStatus = "Checking for updates..."
+  win.updateStatus = "Checking..."
   win.updateProgress = ""
   
-  -- Перевірка Internet Card
   local component = require("component")
   if not component.isAvailable("internet") then
-    win.updateStatus = "Error: No Internet Card found"
+    win.updateStatus = "Error: No Internet Card"
     win.checkingUpdate = false
     return
   end
@@ -179,12 +180,10 @@ function settings.checkUpdates(win)
   local internet = component.internet
   local computer = require("computer")
   
-  -- Завантаження version.txt з GitHub
   local url = "https://raw.githubusercontent.com/FixlutGames21/FixOS/main/version.txt"
-  
   local handle = internet.request(url)
   if not handle then
-    win.updateStatus = "Error: Connection failed"
+    win.updateStatus = "Connection failed"
     win.checkingUpdate = false
     return
   end
@@ -204,11 +203,8 @@ function settings.checkUpdates(win)
   
   handle.close()
   
-  -- Порівняння версій
   if data and #data > 0 then
     local remoteVersion = data:match("[%d%.]+")
-    
-    -- Читаємо локальну версію
     local localVersion = "1.0.0"
     local f = io.open("/version.txt", "r")
     if f then
@@ -217,14 +213,14 @@ function settings.checkUpdates(win)
     end
     
     if remoteVersion and remoteVersion ~= localVersion then
-      win.updateStatus = "Update available: v" .. remoteVersion
-      win.updateProgress = "Your version: v" .. localVersion
+      win.updateStatus = "Update: v" .. remoteVersion
+      win.updateProgress = "Current: v" .. localVersion
     else
-      win.updateStatus = "System is up to date (v" .. localVersion .. ")"
+      win.updateStatus = "Up to date (v" .. localVersion .. ")"
       win.updateProgress = ""
     end
   else
-    win.updateStatus = "Error: Cannot check updates"
+    win.updateStatus = "Check failed"
   end
   
   win.checkingUpdate = false
@@ -232,8 +228,8 @@ end
 
 function settings.installUpdates(win)
   win.installingUpdate = true
-  win.updateStatus = "Installing updates..."
-  win.updateProgress = "Downloading files..."
+  win.updateStatus = "Installing..."
+  win.updateProgress = "Downloading..."
   
   local component = require("component")
   local computer = require("computer")
@@ -248,14 +244,16 @@ function settings.installUpdates(win)
   local BASE_URL = "https://raw.githubusercontent.com/FixlutGames21/FixOS/main"
   
   local files = {
+    "boot/init.lua",
     "system/desktop.lua",
-    "system/windows.lua",
-    "boot/init.lua"
+    "system/programs/calculator.lua",
+    "system/programs/notepad.lua",
+    "system/programs/settings.lua",
+    "system/programs/mycomputer.lua"
   }
   
-  -- Завантаження файлів
   for i, file in ipairs(files) do
-    win.updateProgress = string.format("Downloading %d/%d: %s", i, #files, file)
+    win.updateProgress = string.format("%d/%d: %s", i, #files, file)
     
     local url = BASE_URL .. "/" .. file
     local handle = internet.request(url)
@@ -266,23 +264,15 @@ function settings.installUpdates(win)
       
       while computer.uptime() < deadline do
         local chunk = handle.read(math.huge)
-        if chunk then
-          data = data .. chunk
-        else
-          break
-        end
+        if chunk then data = data .. chunk else break end
         require("os").sleep(0.05)
       end
       
       handle.close()
       
       if #data > 0 then
-        -- Запис файлу
         local f = io.open("/" .. file, "w")
-        if f then
-          f:write(data)
-          f:close()
-        end
+        if f then f:write(data); f:close() end
       end
     end
     
@@ -306,11 +296,13 @@ function settings.installUpdates(win)
     end
   end
   
-  win.updateStatus = "Update completed!"
-  win.updateProgress = "Please restart computer to apply"
+  win.updateStatus = "Complete!"
+  win.updateProgress = "Restart to apply"
   win.installingUpdate = false
   
   require("os").sleep(2)
   win.updateStatus = "Ready"
   win.updateProgress = ""
 end
+
+return settings

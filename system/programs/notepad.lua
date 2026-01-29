@@ -1,3 +1,8 @@
+-- ==============================================
+-- FixOS 2.0 - Notepad Program
+-- system/programs/notepad.lua
+-- ==============================================
+
 local notepad = {}
 
 function notepad.init(win)
@@ -18,7 +23,11 @@ function notepad.draw(win, gpu, x, y, w, h)
   gpu.setBackground(0xC0C0C0)
   gpu.fill(x, y + h - 1, w, 1, " ")
   gpu.set(x + 1, y + h - 1, "File: " .. win.filename)
-  gpu.set(x + w - 15, y + h - 1, string.format("Ln %d, Col %d", win.cursorLine, win.cursorCol))
+  
+  local statusText = string.format("Ln %d, Col %d", win.cursorLine, win.cursorCol)
+  if #statusText <= 15 then
+    gpu.set(x + w - 15, y + h - 1, statusText)
+  end
   
   -- Текст
   gpu.setBackground(0xFFFFFF)
@@ -78,3 +87,5 @@ function notepad.key(win, char, code)
   
   return false
 end
+
+return notepad

@@ -1,3 +1,8 @@
+-- ==============================================
+-- FixOS 2.0 - Calculator Program
+-- system/programs/calculator.lua
+-- ==============================================
+
 local calc = {}
 
 function calc.init(win)
@@ -131,3 +136,5 @@ function calc.calculate(win)
   end
   win.newNumber = true
 end
+
+return calc

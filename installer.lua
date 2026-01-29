@@ -179,9 +179,13 @@ local function formatDisk(addr)
   if not proxy then return false, "Cannot access disk" end
   
   local function removeRecursive(path)
-    if proxy.isDirectory(path) then
-      for file in proxy.list(path) do
-        removeRecursive(path .. "/" .. file)
+    local ok, isDir = pcall(proxy.isDirectory, path)
+    if ok and isDir then
+      local ok2, files = pcall(proxy.list, path)
+      if ok2 and files then
+        for file in files do
+          removeRecursive(path .. "/" .. file)
+        end
       end
       pcall(proxy.remove, path)
     else
@@ -189,8 +193,11 @@ local function formatDisk(addr)
     end
   end
   
-  for file in proxy.list("/") do
-    removeRecursive("/" .. file)
+  local ok, files = pcall(proxy.list, "/")
+  if ok and files then
+    for file in files do
+      removeRecursive("/" .. file)
+    end
   end
   
   return true

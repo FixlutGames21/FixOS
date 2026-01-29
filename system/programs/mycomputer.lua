@@ -1,3 +1,8 @@
+-- ==============================================
+-- FixOS 2.0 - My Computer Program
+-- system/programs/mycomputer.lua
+-- ==============================================
+
 local mycomp = {}
 
 function mycomp.init(win)
@@ -13,7 +18,8 @@ function mycomp.init(win)
     local free = 0
     pcall(function() 
       total = proxy.spaceTotal()
-      free = proxy.spaceUsed and (total - proxy.spaceUsed()) or 0
+      local used = proxy.spaceUsed and proxy.spaceUsed() or 0
+      free = total - used
     end)
     
     table.insert(win.drives, {
@@ -75,3 +81,5 @@ function mycomp.draw(win, gpu, x, y, w, h)
     end
   end
 end
+
+return mycomp
