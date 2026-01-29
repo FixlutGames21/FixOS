@@ -1,6 +1,6 @@
 -- ==============================================
 -- FixOS 2.0 - system/desktop.lua
--- Модульний робочий стіл
+-- Модульний робочий стіл (ПОКРАЩЕНО)
 -- ==============================================
 
 local component = require("component")
@@ -9,8 +9,7 @@ local event = require("event")
 local unicode = require("unicode")
 
 if not component.isAvailable("gpu") then
-  print("ERROR: No GPU available!")
-  os.exit()
+  error("ERROR: No GPU available!")
 end
 
 local gpu = component.gpu
@@ -33,7 +32,8 @@ local COLORS = {
   white = 0xFFFFFF,
   black = 0x000000,
   btnHighlight = 0xFFFFFF,
-  btnShadow = 0x808080
+  btnShadow = 0x808080,
+  error = 0xFF0000
 }
 
 -- ICONS
@@ -59,13 +59,20 @@ local function loadProgram(name)
   if programs[name] then return programs[name] end
   
   local path = "/system/programs/" .. name .. ".lua"
+  
+  -- Перевірка існування файлу
+  local fs = require("filesystem")
+  if not fs.exists(path) then
+    return nil, "Program file not found: " .. path
+  end
+  
   local ok, module = pcall(dofile, path)
   
   if ok and module then
     programs[name] = module
     return module
   else
-    return nil
+    return nil, "Failed to load program: " .. tostring(module)
   end
 end
 
@@ -116,6 +123,7 @@ local function drawTaskbar()
   gpu.setForeground(COLORS.btnHighlight)
   for i = 1, w do gpu.set(i, h, "▀") end
   
+  -- Start button
   gpu.setBackground(COLORS.startBtn)
   gpu.setForeground(COLORS.startBtnText)
   gpu.fill(2, h, 9, 1, " ")
@@ -125,6 +133,7 @@ local function drawTaskbar()
   gpu.setForeground(COLORS.btnShadow)
   gpu.set(12, h, "│")
   
+  -- Window buttons
   local btnX = 14
   for i, win in ipairs(activeWindows) do
     if btnX + 15 < w - 7 then
@@ -132,13 +141,14 @@ local function drawTaskbar()
       gpu.setBackground(isFocused and COLORS.taskbarDark or COLORS.taskbar)
       gpu.setForeground(COLORS.black)
       gpu.fill(btnX, h, 15, 1, " ")
-      local title = win.title
+      local title = win.title or "Window"
       if unicode.len(title) > 12 then title = unicode.sub(title, 1, 12) .. "..." end
       gpu.set(btnX + 1, h, title)
       btnX = btnX + 16
     end
   end
   
+  -- Clock
   gpu.setBackground(COLORS.taskbar)
   gpu.setForeground(COLORS.black)
   local time = os.date("%H:%M")
@@ -160,12 +170,15 @@ end
 local function drawWindow(win)
   local wx, wy, ww, wh = win.x, win.y, win.w, win.h
   
+  -- Shadow
   gpu.setBackground(COLORS.black)
   gpu.fill(wx + 1, wy + 1, ww, wh, " ")
   
+  -- Window background
   gpu.setBackground(COLORS.windowBg)
   gpu.fill(wx, wy, ww, wh, " ")
   
+  -- Title bar
   local isFocused = (activeWindows[focusedWindow] == win)
   gpu.setBackground(isFocused and COLORS.windowTitle or COLORS.btnShadow)
   gpu.setForeground(COLORS.white)
@@ -177,14 +190,23 @@ local function drawWindow(win)
   end
   gpu.set(wx + 1, wy, title)
   
+  -- Window controls
   gpu.set(wx + ww - 4, wy, "[_]")
   gpu.set(wx + ww - 2, wy, "[X]")
   
+  -- Content area
   gpu.setBackground(COLORS.windowBg)
   draw3DFrame(wx, wy + 1, ww, wh - 1, true)
   
+  -- Draw program content with error handling
   if win.draw then
-    win:draw(gpu, wx + 1, wy + 2, ww - 2, wh - 3)
+    local ok, err = pcall(win.draw, win, gpu, wx + 1, wy + 2, ww - 2, wh - 3)
+    if not ok then
+      gpu.setBackground(COLORS.windowBg)
+      gpu.setForeground(COLORS.error)
+      gpu.set(wx + 2, wy + 3, "Error drawing window:")
+      gpu.set(wx + 2, wy + 4, tostring(err):sub(1, ww - 4))
+    end
   end
 end
 
@@ -204,17 +226,21 @@ function drawStartMenu()
   local menuX = 2
   local menuY = h - menuH - 1
   
+  -- Shadow
   gpu.setBackground(COLORS.black)
   gpu.fill(menuX + 1, menuY + 1, menuW, menuH, " ")
   
+  -- Menu background
   gpu.setBackground(COLORS.windowBg)
   gpu.fill(menuX, menuY, menuW, menuH, " ")
   
+  -- Title
   gpu.setBackground(COLORS.windowTitle)
   gpu.setForeground(COLORS.white)
   gpu.fill(menuX, menuY, menuW, 2, " ")
   gpu.set(menuX + 1, menuY + 1, " FixOS 2.0")
   
+  -- Menu items
   gpu.setBackground(COLORS.windowBg)
   gpu.setForeground(COLORS.black)
   
@@ -232,6 +258,7 @@ function drawStartMenu()
     gpu.set(menuX + 2, menuY + item.y, item.text)
   end
   
+  -- Separators
   gpu.setForeground(COLORS.btnShadow)
   for i = 0, menuW - 1 do
     gpu.set(menuX + i, menuY + 6, "─")
@@ -244,9 +271,30 @@ end
 
 -- Window Management
 local function createWindow(title, width, height, programName)
-  local program = loadProgram(programName)
+  local program, err = loadProgram(programName)
   if not program then
-    return nil
+    -- Show error window
+    local errorWin = {
+      title = "Error",
+      x = math.floor((w - 40) / 2),
+      y = math.floor((h - 10) / 2),
+      w = 40,
+      h = 10,
+      error = err or "Unknown error"
+    }
+    
+    function errorWin:draw(gpu, x, y, w, h)
+      gpu.setBackground(COLORS.windowBg)
+      gpu.setForeground(COLORS.error)
+      gpu.set(x + 2, y + 2, "Failed to load program:")
+      gpu.setForeground(COLORS.black)
+      local errMsg = self.error:sub(1, w - 4)
+      gpu.set(x + 2, y + 4, errMsg)
+    end
+    
+    table.insert(activeWindows, errorWin)
+    focusedWindow = #activeWindows
+    return errorWin
   end
   
   local winX = math.floor((w - width) / 2) + #activeWindows * 2
@@ -265,25 +313,42 @@ local function createWindow(title, width, height, programName)
   }
   
   if program and program.init then
-    program.init(win)
+    local ok, err = pcall(program.init, win)
+    if not ok then
+      win.error = "Init error: " .. tostring(err)
+    end
   end
   
   function win:draw(gpu, x, y, w, h)
-    if self.program and self.program.draw then
+    if self.error then
+      gpu.setBackground(COLORS.windowBg)
+      gpu.setForeground(COLORS.error)
+      gpu.set(x + 2, y + 2, "Error:")
+      gpu.setForeground(COLORS.black)
+      gpu.set(x + 2, y + 3, self.error:sub(1, w - 4))
+    elseif self.program and self.program.draw then
       self.program.draw(self, gpu, x, y, w, h)
     end
   end
   
   function win:click(x, y, button)
     if self.program and self.program.click then
-      return self.program.click(self, x, y, button)
+      local ok, result = pcall(self.program.click, self, x, y, button)
+      if ok then
+        return result
+      end
     end
+    return false
   end
   
   function win:key(char, code)
     if self.program and self.program.key then
-      return self.program.key(self, char, code)
+      local ok, result = pcall(self.program.key, self, char, code)
+      if ok then
+        return result
+      end
     end
+    return false
   end
   
   table.insert(activeWindows, win)
@@ -435,13 +500,16 @@ local function main()
           if winIndex then
             focusWindow(winIndex)
             
+            -- Close button
             if y == win.y and x >= win.x + win.w - 2 and x <= win.x + win.w - 1 then
               closeWindow(#activeWindows)
               redrawAll()
+            -- Title bar (drag)
             elseif y == win.y and x >= win.x and x < win.x + win.w - 6 then
               dragWindow = win
               dragOffsetX = x - win.x
               dragOffsetY = y - win.y
+            -- Content area
             else
               local relX = x - win.x - 1
               local relY = y - win.y - 2
@@ -478,6 +546,7 @@ local function main()
         dragWindow.x = x - dragOffsetX
         dragWindow.y = y - dragOffsetY
         
+        -- Keep window on screen
         if dragWindow.x < 0 then dragWindow.x = 0 end
         if dragWindow.y < 1 then dragWindow.y = 1 end
         if dragWindow.x + dragWindow.w > w then dragWindow.x = w - dragWindow.w end
@@ -490,10 +559,10 @@ local function main()
     elseif eventType == "key_down" then
       local _, _, char, code = table.unpack(eventData)
       
-      if code == 31 then
+      if code == 31 then -- S key - Start menu
         startMenuOpen = not startMenuOpen
         redrawAll()
-      elseif code == 45 then
+      elseif code == 45 then -- X key - Shutdown
         executeMenuAction("shutdown")
       elseif focusedWindow and activeWindows[focusedWindow] then
         local win = activeWindows[focusedWindow]
@@ -506,6 +575,7 @@ local function main()
   end
 end
 
+-- Запуск з обробкою помилок
 local ok, err = pcall(main)
 if not ok then
   gpu.setBackground(0x000000)
@@ -513,6 +583,7 @@ if not ok then
   gpu.fill(1, 1, w, h, " ")
   gpu.set(2, 2, "Desktop Error:")
   gpu.set(2, 3, tostring(err))
+  gpu.set(2, 5, "Press any key to shutdown")
   event.pull("key_down")
   computer.shutdown()
 end
