@@ -1,49 +1,103 @@
 -- ==============================================
--- ФАЙЛ: boot/init.lua
--- Завантажувач FixOS 2000
+-- FixOS 2.0 - boot/init.lua
+-- Завантажувач системи
 -- ==============================================
-local component = require("component")
-local computer = require("computer")
 
--- Перевірка GPU
-if component.isAvailable("gpu") then
-  local gpu = component.gpu
+local component_invoke = component.invoke
+local component_list = component.list
+local component_proxy = component.proxy
+
+-- GPU та екран
+local gpu = component_list("gpu")()
+local screen = component_list("screen")()
+
+if gpu and screen then
+  component_invoke(gpu, "bind", screen)
   
-  -- Налаштування екрану
-  local w, h = gpu.maxResolution()
-  gpu.setResolution(math.min(80, w), math.min(25, h))
+  local maxW, maxH = component_invoke(gpu, "maxResolution")
+  local w = maxW > 80 and 80 or maxW
+  local h = maxH > 25 and 25 or maxH
+  component_invoke(gpu, "setResolution", w, h)
   
-  -- Екран завантаження
-  gpu.setBackground(0x000000)
-  gpu.setForeground(0x00FF00)
-  gpu.fill(1, 1, 80, 25, " ")
-  gpu.set(2, 2, "FixOS 2000 booting...")
-  gpu.set(2, 4, "Loading system...")
+  component_invoke(gpu, "setBackground", 0x000000)
+  component_invoke(gpu, "setForeground", 0x00FF00)
+  component_invoke(gpu, "fill", 1, 1, w, h, " ")
+  
+  component_invoke(gpu, "set", 2, 2, "FixOS 2.0")
+  component_invoke(gpu, "set", 2, 4, "Booting...")
+  
+  for i = 1, 3 do
+    component_invoke(gpu, "set", 12 + i, 4, ".")
+    local deadline = computer.uptime() + 0.3
+    while computer.uptime() < deadline do end
+  end
 end
 
--- Затримка для ефекту
-require("os").sleep(1.5)
+-- Завантаження базових бібліотек
+_G._OSVERSION = "FixOS 2.0"
 
--- Запуск робочого столу
-local success, err = pcall(function()
-  dofile("/system/desktop.lua")
-end)
-
--- Обробка помилок
-if not success then
-  if component.isAvailable("gpu") then
-    local gpu = component.gpu
-    gpu.setBackground(0x000000)
-    gpu.setForeground(0xFF0000)
-    gpu.fill(1, 1, 80, 25, " ")
-    gpu.set(2, 2, "FixOS Boot Error:")
-    gpu.set(2, 4, tostring(err))
-    gpu.set(2, 6, "Press any key to shutdown...")
-  else
-    print("Boot failed: " .. tostring(err))
-    print("Press any key to shutdown...")
+-- Шукаємо OpenOS boot
+local hasOpenOS = false
+for addr in component_list("filesystem") do
+  local fs = component_proxy(addr)
+  if fs and component_invoke(addr, "exists", "/lib/core/boot.lua") then
+    hasOpenOS = true
+    
+    -- Завантажуємо OpenOS
+    local handle = component_invoke(addr, "open", "/lib/core/boot.lua")
+    if handle then
+      local data = ""
+      repeat
+        local chunk = component_invoke(addr, "read", handle, math.huge)
+        data = data .. (chunk or "")
+      until not chunk
+      component_invoke(addr, "close", handle)
+      
+      local code, reason = load(data, "=/lib/core/boot.lua", "bt", _G)
+      if code then
+        xpcall(code, debug.traceback)
+      end
+    end
+    break
   end
-  
-  require("event").pull("key_down")
+end
+
+-- Запускаємо desktop
+local success = false
+
+if hasOpenOS then
+  -- З OpenOS
+  success = pcall(function()
+    dofile("/system/desktop.lua")
+  end)
+else
+  -- Без OpenOS - прямий запуск
+  for addr in component_list("filesystem") do
+    local fs = component_proxy(addr)
+    if fs and component_invoke(addr, "exists", "/system/desktop.lua") then
+      local handle = component_invoke(addr, "open", "/system/desktop.lua")
+      if handle then
+        local data = ""
+        repeat
+          local chunk = component_invoke(addr, "read", handle, math.huge)
+          data = data .. (chunk or "")
+        until not chunk
+        component_invoke(addr, "close", handle)
+        
+        local code, reason = load(data, "=desktop", "bt", _G)
+        if code then
+          success = pcall(code)
+        end
+      end
+      break
+    end
+  end
+end
+
+if not success and gpu then
+  component_invoke(gpu, "setForeground", 0xFF0000)
+  component_invoke(gpu, "set", 2, 8, "Boot failed!")
+  component_invoke(gpu, "set", 2, 10, "Press any key to shutdown")
+  computer.pullSignal()
   computer.shutdown()
 end
