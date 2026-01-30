@@ -1,6 +1,6 @@
 -- ==============================================
--- FixOS 2.0 Installer - ПОКРАЩЕНА ВЕРСІЯ
--- Покращене завантаження з GitHub + retry логіка
+-- FixOS 2.0 Installer (FIXED)
+-- Покращена версія з правильною структурою
 -- ==============================================
 
 local component = require("component")
@@ -8,15 +8,20 @@ local computer = require("computer")
 local filesystem = require("filesystem")
 local event = require("event")
 
--- COMPONENTS
+-- ПЕРЕВІРКА КОМПОНЕНТІВ
 local gpu = component.gpu
 local internet = component.isAvailable("internet") and component.internet or nil
 
+if not gpu then
+  error("GPU not found!")
+end
+
+-- НАЛАШТУВАННЯ ЕКРАНУ
 local w, h = gpu.maxResolution()
 gpu.setResolution(math.min(80, w), math.min(25, h))
 w, h = gpu.getResolution()
 
--- COLORS
+-- КОЛЬОРИ
 local COLOR = {
   bg = 0x0000AA,
   panel = 0x000080,
@@ -29,11 +34,10 @@ local COLOR = {
   red = 0xFF0000,
   darkRed = 0xAA0000,
   yellow = 0xFFFF00,
-  cyan = 0x00FFFF,
   orange = 0xFFAA00
 }
 
--- НОВА СТРУКТУРА ФАЙЛІВ
+-- СПИСОК ФАЙЛІВ ДЛЯ ЗАВАНТАЖЕННЯ
 local FILES = {
   {path = "boot/init.lua", target = "/boot/init.lua"},
   {path = "system/desktop.lua", target = "/system/desktop.lua"},
@@ -46,18 +50,23 @@ local FILES = {
 
 local REPO_URL = "https://raw.githubusercontent.com/FixlutGames21/FixOS/main"
 
--- GUI FUNCTIONS
+-- ==================== GUI ФУНКЦІЇ ====================
+
 local function clearScreen()
   gpu.setBackground(COLOR.bg)
   gpu.fill(1, 1, w, h, " ")
 end
 
 local function drawBox(x, y, width, height, title)
+  -- Тінь
   gpu.setBackground(COLOR.darkGray)
   gpu.fill(x + 1, y + 1, width, height, " ")
+  
+  -- Основа
   gpu.setBackground(COLOR.lightGray)
   gpu.fill(x, y, width, height, " ")
   
+  -- Заголовок
   if title then
     gpu.setBackground(COLOR.panel)
     gpu.fill(x, y, width, 2, " ")
@@ -66,6 +75,7 @@ local function drawBox(x, y, width, height, title)
     gpu.set(titleX, y + 1, title)
   end
   
+  -- Рамка (3D ефект)
   gpu.setForeground(COLOR.white)
   for i = 0, width - 1 do gpu.set(x + i, y, "▀") end
   for i = 0, height - 1 do gpu.set(x, y + i, "▌") end
@@ -79,6 +89,7 @@ local function drawButton(x, y, width, label, bgColor)
   gpu.setBackground(bgColor)
   gpu.fill(x, y, width, 3, " ")
   
+  -- 3D ефект
   gpu.setForeground(COLOR.white)
   for i = 0, width - 1 do gpu.set(x + i, y, "▀") end
   for i = 0, 2 do gpu.set(x, y + i, "▌") end
@@ -87,6 +98,7 @@ local function drawButton(x, y, width, label, bgColor)
   for i = 0, width - 1 do gpu.set(x + i, y + 2, "▄") end
   for i = 0, 2 do gpu.set(x + width - 1, y + i, "▐") end
   
+  -- Текст
   gpu.setForeground(COLOR.white)
   local labelX = x + math.floor((width - #label) / 2)
   gpu.set(labelX, y + 1, label)
@@ -119,78 +131,52 @@ local function isInButton(btn, mx, my)
   return mx >= btn.x and mx < btn.x + btn.w and my >= btn.y and my < btn.y + btn.h
 end
 
--- ПОКРАЩЕНА ФУНКЦІЯ ЗАВАНТАЖЕННЯ З RETRY
+-- ==================== ФУНКЦІЇ ЗАВАНТАЖЕННЯ ====================
+
 local function downloadFile(url, maxRetries)
   if not internet then return nil, "No Internet Card" end
   
   maxRetries = maxRetries or 3
-  local attempt = 0
   
-  while attempt < maxRetries do
-    attempt = attempt + 1
-    
-    -- Відкриваємо з'єднання
+  for attempt = 1, maxRetries do
     local success, handle = pcall(internet.request, url)
-    if not success or not handle then
-      if attempt < maxRetries then
-        os.sleep(1)
-      else
-        return nil, "Connection failed after " .. maxRetries .. " attempts"
-      end
-    else
+    
+    if success and handle then
       local result = {}
       local deadline = computer.uptime() + 60
-      local lastChunk = computer.uptime()
       
-      -- Читаємо дані
       while computer.uptime() < deadline do
-        local chunkSuccess, chunk = pcall(handle.read, math.huge)
-        
-        if chunkSuccess and chunk then
+        local chunk = handle.read(math.huge)
+        if chunk then
           table.insert(result, chunk)
-          lastChunk = computer.uptime()
-        elseif not chunkSuccess then
-          -- Помилка читання
-          break
-        elseif computer.uptime() - lastChunk > 5 then
-          -- Таймаут між чанками
-          break
-        elseif not chunk then
-          -- Закінчили читання
+        else
           break
         end
-        
         os.sleep(0.05)
       end
       
       pcall(handle.close)
       local data = table.concat(result)
       
-      -- Перевірка даних
-      if #data == 0 then
-        if attempt < maxRetries then
-          os.sleep(1)
-        else
-          return nil, "Empty response"
-        end
-      elseif data:match("^%s*<!DOCTYPE") or data:match("^%s*<html") then
-        if attempt < maxRetries then
-          os.sleep(1)
-        else
-          return nil, "File not found (404)"
-        end
-      else
-        -- Успішно завантажено
+      -- Перевірка валідності
+      if #data > 0 and not data:match("^%s*<!DOCTYPE") and not data:match("^%s*<html") then
         return data
       end
     end
+    
+    if attempt < maxRetries then
+      os.sleep(1)
+    end
   end
   
-  return nil, "Download failed after " .. maxRetries .. " attempts"
+  return nil, "Download failed"
 end
+
+-- ==================== ФУНКЦІЇ ДИСКІВ ====================
 
 local function listDisks()
   local disks = {}
+  
   for addr in component.list("filesystem") do
     local proxy = component.proxy(addr)
     if proxy then
@@ -203,6 +189,7 @@ local function listDisks()
       local ok3, total = pcall(proxy.spaceTotal)
       local size = ok3 and total or 0
       
+      -- Фільтруємо маленькі диски (tmpfs)
       if size > 200000 and not diskLabel:match("tmpfs") then
         table.insert(disks, {
           address = addr,
@@ -214,6 +201,7 @@ local function listDisks()
     end
   end
   
+  -- Сортуємо за розміром
   table.sort(disks, function(a, b) return a.size > b.size end)
   return disks
 end
@@ -228,8 +216,7 @@ local function formatDisk(addr)
       local ok2, files = pcall(proxy.list, path)
       if ok2 and files then
         for file in files do
-          local fullPath = path .. "/" .. file
-          removeRecursive(fullPath)
+          removeRecursive(path .. "/" .. file)
         end
       end
       pcall(proxy.remove, path)
@@ -287,21 +274,21 @@ local function writeFileToDisk(proxy, path, content)
   return true
 end
 
--- SCREENS
+-- ==================== ЕКРАНИ ====================
+
 local function welcomeScreen()
   clearScreen()
   drawBox(8, 2, w - 16, h - 4, "FixOS 2.0 Setup")
   
   centerText(6, COLOR.white, "Welcome to FixOS 2.0 Installer")
-  centerText(8, COLOR.cyan, "Windows 2000 Style Operating System")
+  centerText(8, COLOR.orange, "FIXED VERSION - Stable & Working")
   
-  centerText(11, COLOR.white, "New modular structure:")
+  centerText(11, COLOR.white, "Improvements:")
   gpu.setForeground(COLOR.lightGray)
-  gpu.set(15, 13, "• Separate program files")
-  gpu.set(15, 14, "• /boot/init.lua for booting")
-  gpu.set(15, 15, "• /system/programs/ folder")
-  gpu.set(15, 16, "• Easy to add new apps")
-  gpu.set(15, 17, "• Improved file downloading")
+  gpu.set(15, 13, "• Proper bootloader")
+  gpu.set(15, 14, "• Fixed component API")
+  gpu.set(15, 15, "• Stable desktop")
+  gpu.set(15, 16, "• Working programs")
   
   if not internet then
     centerText(19, COLOR.red, "ERROR: Internet Card required!")
@@ -367,12 +354,6 @@ local function selectDiskScreen()
           elseif btn.disk and not btn.disk.readOnly then return btn.disk end
         end
       end
-    elseif ev == "key_down" then
-      if _ == 1 then return nil end
-      if _ >= 2 and _ <= 10 then
-        local idx = _ - 1
-        if disks[idx] and not disks[idx].readOnly then return disks[idx] end
-      end
     end
   end
 end
@@ -395,10 +376,6 @@ local function confirmFormatScreen(disk)
     if ev == "touch" then
       if isInButton(btnYes, x, y) then return true
       elseif isInButton(btnNo, x, y) then return false end
-    elseif ev == "key_down" then
-      if _ == 21 then return true end
-      if _ == 49 then return false end
-      if _ == 1 then return false end
     end
   end
 end
@@ -409,7 +386,7 @@ local function installScreen(disk)
   
   local proxy = component.proxy(disk.address)
   
-  -- Formatting
+  -- Етап 1: Форматування
   centerText(8, COLOR.white, "Step 1/2: Formatting disk...")
   centerText(10, COLOR.lightGray, disk.label)
   drawProgressBar(15, 12, w - 30, 0)
@@ -427,12 +404,11 @@ local function installScreen(disk)
   centerText(14, COLOR.green, "Disk formatted successfully!")
   os.sleep(1)
   
-  -- Downloading files
-  centerText(8, COLOR.white, "Step 2/2: Downloading files...        ")
+  -- Етап 2: Завантаження файлів
+  centerText(8, COLOR.white, "Step 2/2: Downloading files...")
   
   local total = #FILES
-  local downloaded = 0
-  local failed = 0
+  local succeeded = 0
   
   for i, file in ipairs(FILES) do
     local fileName = file.path
@@ -441,52 +417,27 @@ local function installScreen(disk)
     end
     centerText(10, COLOR.lightGray, fileName .. string.rep(" ", 50))
     
-    local progress = (i - 1) / total
-    drawProgressBar(15, 12, w - 30, 0.5 + progress * 0.5)
+    local progress = 0.5 + ((i - 1) / total) * 0.5
+    drawProgressBar(15, 12, w - 30, progress)
     
-    centerText(14, COLOR.yellow, "Downloading... (Attempt 1/3)        ")
+    centerText(14, COLOR.yellow, "Downloading...                    ")
+    
     local url = REPO_URL .. "/" .. file.path
-    
-    -- Показуємо статус
-    local statusY = 16
-    gpu.setForeground(COLOR.orange)
-    gpu.set(12, statusY, "Retrying with improved method...")
-    
     local data, downloadErr = downloadFile(url, 3)
     
-    if not data then
-      centerText(statusY, COLOR.red, "Download failed: " .. tostring(downloadErr))
-      centerText(statusY + 1, COLOR.yellow, "File: " .. file.path)
-      centerText(statusY + 3, COLOR.lightGray, "Continue anyway? [Y/N]")
-      
-      local cont = false
-      while true do
-        local ev, _, _, code = event.pull("key_down")
-        if code == 21 then -- Y
-          cont = true
-          break
-        elseif code == 49 or code == 1 then -- N or ESC
-          break
-        end
-      end
-      
-      if not cont then
-        return false
-      end
-      
-      failed = failed + 1
-    else
-      centerText(14, COLOR.yellow, "Writing to disk...    ")
+    if data then
+      centerText(14, COLOR.yellow, "Writing to disk...                ")
       local writeOk, writeErr = writeFileToDisk(proxy, file.target, data)
       
-      if not writeOk then
+      if writeOk then
+        succeeded = succeeded + 1
+      else
         centerText(16, COLOR.red, "Write failed: " .. tostring(writeErr))
-        centerText(18, COLOR.lightGray, "Press any key to exit")
-        event.pull("key_down")
-        return false
+        os.sleep(2)
       end
-      
-      downloaded = downloaded + 1
+    else
+      centerText(16, COLOR.red, "Download failed: " .. tostring(downloadErr))
+      os.sleep(2)
     end
     
     os.sleep(0.2)
@@ -494,22 +445,22 @@ local function installScreen(disk)
   
   drawProgressBar(15, 12, w - 30, 1.0)
   
-  if failed > 0 then
-    centerText(14, COLOR.orange, string.format("Completed with %d warnings", failed))
+  if succeeded < total then
+    centerText(14, COLOR.orange, string.format("Warning: %d/%d files installed", succeeded, total))
   else
-    centerText(14, COLOR.green, "Installation complete!     ")
+    centerText(14, COLOR.green, "Installation complete!            ")
   end
   
-  -- Встановлюємо boot адресу
+  -- Встановлення boot адреси
   local bootOk = pcall(computer.setBootAddress, disk.address)
   if bootOk then
-    centerText(16, COLOR.cyan, "Boot address set successfully")
+    centerText(16, COLOR.green, "Boot address set successfully")
   else
     centerText(16, COLOR.yellow, "Warning: Could not set boot address")
   end
   
   os.sleep(2)
-  return true
+  return succeeded >= total - 1 -- Дозволяємо 1 помилку
 end
 
 local function finishScreen()
@@ -519,7 +470,7 @@ local function finishScreen()
   centerText(10, COLOR.green, "FixOS 2.0 installed successfully!")
   centerText(13, COLOR.white, "The computer will now reboot")
   centerText(14, COLOR.white, "and start FixOS 2.0")
-  centerText(17, COLOR.cyan, "Enjoy your retro OS experience!")
+  centerText(17, COLOR.orange, "Enjoy your stable OS!")
   centerText(20, COLOR.lightGray, "Rebooting in 5 seconds...")
   
   for i = 5, 1, -1 do
@@ -530,7 +481,8 @@ local function finishScreen()
   computer.shutdown(true)
 end
 
--- MAIN
+-- ==================== ГОЛОВНИЙ КОД ====================
+
 local function main()
   if not welcomeScreen() then
     clearScreen()
@@ -554,7 +506,9 @@ local function main()
     return
   end
   
-  if not installScreen(disk) then return end
+  if not installScreen(disk) then 
+    return 
+  end
   
   finishScreen()
 end
@@ -565,35 +519,8 @@ if not ok then
   clearScreen()
   gpu.setBackground(COLOR.bg)
   gpu.setForeground(COLOR.red)
-  centerText(h / 2 - 2, COLOR.red, "Installer Error:")
-  gpu.setForeground(COLOR.white)
-  
-  local errMsg = tostring(err)
-  if #errMsg > w - 4 then
-    -- Розбиваємо на рядки
-    local words = {}
-    for word in errMsg:gmatch("%S+") do
-      table.insert(words, word)
-    end
-    
-    local line = ""
-    local y = h / 2
-    for _, word in ipairs(words) do
-      if #line + #word + 1 > w - 4 then
-        centerText(y, COLOR.white, line)
-        y = y + 1
-        line = word
-      else
-        line = line .. (line ~= "" and " " or "") .. word
-      end
-    end
-    if line ~= "" then
-      centerText(y, COLOR.white, line)
-    end
-  else
-    centerText(h / 2, COLOR.white, errMsg)
-  end
-  
-  centerText(h / 2 + 3, COLOR.lightGray, "Press any key to exit")
+  centerText(h / 2 - 1, COLOR.red, "Installer Error:")
+  centerText(h / 2, COLOR.white, tostring(err))
+  centerText(h / 2 + 2, COLOR.lightGray, "Press any key to exit")
   event.pull("key_down")
 end

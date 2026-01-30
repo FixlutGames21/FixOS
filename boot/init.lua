@@ -1,143 +1,277 @@
 -- ==============================================
--- FixOS 2.0 - boot/init.lua
--- Завантажувач системи (ПОКРАЩЕНО)
+-- FixOS 2.0 - boot/init.lua (FIXED)
+-- Правильний bootloader для OpenComputers
 -- ==============================================
 
-local component_invoke = component.invoke
-local component_list = component.list
-local component_proxy = component.proxy
+-- На момент запуску boot/init.lua доступні ТІЛЬКИ:
+-- - component (raw API)
+-- - computer (raw API)
+-- Нічого іншого! Навіть print() не існує.
 
--- Безпечна функція виклику компонентів
+local component = component
+local computer = computer
+
+-- ====================
+-- ЕТАП 1: Базова ініціалізація GPU
+-- ====================
+
 local function safeInvoke(addr, method, ...)
-  local result = table.pack(pcall(component_invoke, addr, method, ...))
+  local result = table.pack(pcall(component.invoke, addr, method, ...))
   if result[1] then
     return table.unpack(result, 2, result.n)
   end
   return nil
 end
 
--- GPU та екран
-local gpu = component_list("gpu")()
-local screen = component_list("screen")()
+-- Знаходимо GPU та екран
+local gpu_addr = component.list("gpu", true)()
+local screen_addr = component.list("screen", true)()
 
-if gpu and screen then
-  safeInvoke(gpu, "bind", screen)
-  
-  local maxW, maxH = safeInvoke(gpu, "maxResolution")
-  if maxW and maxH then
-    local w = maxW > 80 and 80 or maxW
-    local h = maxH > 25 and 25 or maxH
-    safeInvoke(gpu, "setResolution", w, h)
-    
-    safeInvoke(gpu, "setBackground", 0x000000)
-    safeInvoke(gpu, "setForeground", 0x00FF00)
-    safeInvoke(gpu, "fill", 1, 1, w, h, " ")
-    
-    safeInvoke(gpu, "set", 2, 2, "FixOS 2.0")
-    safeInvoke(gpu, "set", 2, 4, "Booting...")
-    
-    -- Анімація завантаження
-    for i = 1, 3 do
-      safeInvoke(gpu, "set", 12 + i, 4, ".")
-      local deadline = computer.uptime() + 0.3
-      while computer.uptime() < deadline do end
-    end
+-- Функція для виводу тексту (наш власний "print")
+local currentY = 1
+local function bootPrint(text)
+  if gpu_addr and screen_addr then
+    safeInvoke(gpu_addr, "set", 2, currentY, tostring(text))
+    currentY = currentY + 1
   end
 end
 
--- Завантаження базових бібліотек
-_G._OSVERSION = "FixOS 2.0"
+if gpu_addr and screen_addr then
+  -- Прив'язуємо GPU до екрану
+  safeInvoke(gpu_addr, "bind", screen_addr)
+  
+  -- Встановлюємо розумну роздільну здатність
+  local maxW, maxH = safeInvoke(gpu_addr, "maxResolution")
+  if maxW and maxH then
+    local w = math.min(80, maxW)
+    local h = math.min(25, maxH)
+    safeInvoke(gpu_addr, "setResolution", w, h)
+  end
+  
+  -- Очищуємо екран
+  safeInvoke(gpu_addr, "setBackground", 0x000000)
+  safeInvoke(gpu_addr, "setForeground", 0x00FF00)
+  safeInvoke(gpu_addr, "fill", 1, 1, 80, 25, " ")
+  
+  safeInvoke(gpu_addr, "set", 2, 1, "FixOS 2.0 - Booting...")
+  currentY = 3
+end
 
--- Функція завантаження файлу
-local function loadFile(addr, path)
-  local handle = safeInvoke(addr, "open", path)
-  if not handle then return nil end
+-- ====================
+-- ЕТАП 2: Створення базових функцій
+-- ====================
+
+bootPrint("Loading base functions...")
+
+-- Базова функція print
+_G.print = function(...)
+  local args = {...}
+  local text = ""
+  for i, v in ipairs(args) do
+    text = text .. tostring(v)
+    if i < #args then text = text .. "\t" end
+  end
+  bootPrint(text)
+end
+
+-- Базова функція error
+_G.error = function(msg, level)
+  print("ERROR: " .. tostring(msg))
+  computer.beep(1000, 0.2)
+  computer.pullSignal(3)
+  computer.shutdown()
+end
+
+-- ====================
+-- ЕТАП 3: Створення component proxy API
+-- ====================
+
+bootPrint("Creating component API...")
+
+-- Створюємо зручний API для компонентів
+local component_api = {}
+component_api.list = component.list
+component_api.type = component.type
+component_api.slot = component.slot
+component_api.methods = component.methods
+component_api.invoke = component.invoke
+component_api.doc = component.doc
+
+-- Proxy для зручної роботи
+function component_api.proxy(address)
+  local type = component.type(address)
+  if not type then return nil, "no such component" end
+  
+  local proxy = {address = address, type = type}
+  for method in pairs(component.methods(address)) do
+    proxy[method] = function(...)
+      return component.invoke(address, method, ...)
+    end
+  end
+  
+  return proxy
+end
+
+-- Знаходження компонента за типом
+function component_api.get(address, componentType)
+  local type = component.type(address)
+  if type == componentType or address:sub(1, #address) == address then
+    return address
+  end
+  return nil, "no such component"
+end
+
+function component_api.isAvailable(componentType)
+  return component.list(componentType)() ~= nil
+end
+
+_G.component = component_api
+
+-- ====================
+-- ЕТАП 4: Файлова система
+-- ====================
+
+bootPrint("Mounting filesystem...")
+
+local boot_fs_addr = computer.getBootAddress()
+local boot_fs = component.proxy(boot_fs_addr)
+
+if not boot_fs then
+  error("Cannot access boot filesystem!")
+end
+
+-- Примітивна функція завантаження файлу
+local function loadfile_raw(path)
+  if not boot_fs.exists(path) then
+    return nil, "file not found: " .. path
+  end
+  
+  local handle = boot_fs.open(path, "r")
+  if not handle then
+    return nil, "cannot open: " .. path
+  end
   
   local data = ""
-  local chunk
   repeat
-    chunk = safeInvoke(addr, "read", handle, math.huge)
+    local chunk = boot_fs.read(handle, math.huge)
     if chunk then
       data = data .. chunk
     end
   until not chunk
   
-  safeInvoke(addr, "close", handle)
-  return data
-end
-
--- Шукаємо OpenOS boot
-local hasOpenOS = false
-for addr in component_list("filesystem") do
-  local fs = component_proxy(addr)
-  if fs and safeInvoke(addr, "exists", "/lib/core/boot.lua") then
-    hasOpenOS = true
-    
-    if gpu then
-      safeInvoke(gpu, "set", 2, 6, "Loading OpenOS...")
-    end
-    
-    -- Завантажуємо OpenOS
-    local data = loadFile(addr, "/lib/core/boot.lua")
-    if data then
-      local code, reason = load(data, "=/lib/core/boot.lua", "bt", _G)
-      if code then
-        local ok = xpcall(code, function(err)
-          if gpu then
-            safeInvoke(gpu, "setForeground", 0xFFFF00)
-            safeInvoke(gpu, "set", 2, 8, "OpenOS warning: " .. tostring(err))
-          end
-          return err
-        end)
-      end
-    end
-    break
+  boot_fs.close(handle)
+  
+  -- Компілюємо код
+  local func, err = load(data, "=" .. path, "bt", _G)
+  if not func then
+    return nil, "syntax error: " .. tostring(err)
   end
+  
+  return func
 end
 
--- Запускаємо desktop
-local success = false
-local desktopPath = "/system/desktop.lua"
+_G.loadfile = loadfile_raw
 
-if gpu then
-  safeInvoke(gpu, "set", 2, 8, "Starting Desktop...")
+-- Функція dofile
+_G.dofile = function(path)
+  local func, err = loadfile(path)
+  if not func then
+    error(err)
+  end
+  return func()
 end
 
-if hasOpenOS then
-  -- З OpenOS - використовуємо dofile
-  success = pcall(function()
-    dofile(desktopPath)
-  end)
-else
-  -- Без OpenOS - прямий запуск
-  for addr in component_list("filesystem") do
-    local fs = component_proxy(addr)
-    if fs and safeInvoke(addr, "exists", desktopPath) then
-      local data = loadFile(addr, desktopPath)
-      if data then
-        local code, reason = load(data, "=desktop", "bt", _G)
-        if code then
-          success = pcall(code)
-          if success then
-            break
-          end
-        end
+-- ====================
+-- ЕТАП 5: Простий require
+-- ====================
+
+bootPrint("Creating require system...")
+
+local loaded = {}
+_G.package = {loaded = loaded, path = "/lib/?.lua"}
+
+_G.require = function(name)
+  -- Якщо вже завантажено, повертаємо
+  if loaded[name] then
+    return loaded[name]
+  end
+  
+  -- Шукаємо файл
+  local paths = {
+    "/lib/" .. name .. ".lua",
+    "/lib/" .. name:gsub("%.", "/") .. ".lua",
+    "/system/lib/" .. name .. ".lua"
+  }
+  
+  for _, path in ipairs(paths) do
+    if boot_fs.exists(path) then
+      local func, err = loadfile(path)
+      if not func then
+        error("Error loading module '" .. name .. "': " .. tostring(err))
       end
+      
+      local result = func()
+      loaded[name] = result or true
+      return loaded[name]
     end
   end
+  
+  error("module '" .. name .. "' not found")
 end
 
--- Обробка помилок
-if not success and gpu then
-  safeInvoke(gpu, "setForeground", 0xFF0000)
-  safeInvoke(gpu, "set", 2, 10, "Boot failed!")
-  safeInvoke(gpu, "set", 2, 11, "Desktop not found or error occurred")
-  safeInvoke(gpu, "set", 2, 13, "Troubleshooting:")
-  safeInvoke(gpu, "setForeground", 0xFFFFFF)
-  safeInvoke(gpu, "set", 2, 14, "1. Check if /system/desktop.lua exists")
-  safeInvoke(gpu, "set", 2, 15, "2. Reinstall FixOS using installer")
-  safeInvoke(gpu, "set", 2, 16, "3. Check filesystem permissions")
-  safeInvoke(gpu, "set", 2, 18, "Press any key to shutdown")
-  computer.pullSignal()
-  computer.shutdown()
+-- ====================
+-- ЕТАП 6: Базові бібліотеки
+-- ====================
+
+-- Додаємо os.sleep
+if not _G.os then _G.os = {} end
+_G.os.sleep = function(seconds)
+  local deadline = computer.uptime() + (seconds or 0)
+  repeat
+    computer.pullSignal(deadline - computer.uptime())
+  until computer.uptime() >= deadline
 end
+
+-- Додаємо базовий os.date
+_G.os.date = function(format, time)
+  -- Спрощена версія - просто повертаємо час
+  time = time or os.time()
+  if format == "%H:%M" then
+    local hours = math.floor((time / 3600) % 24)
+    local minutes = math.floor((time / 60) % 60)
+    return string.format("%02d:%02d", hours, minutes)
+  end
+  return tostring(time)
+end
+
+_G.os.time = function()
+  return math.floor(computer.uptime())
+end
+
+-- ====================
+-- ЕТАП 7: Запуск desktop.lua
+-- ====================
+
+bootPrint("Starting desktop...")
+os.sleep(0.5)
+
+-- Перевіряємо наявність desktop.lua
+if not boot_fs.exists("/system/desktop.lua") then
+  error("Desktop not found: /system/desktop.lua")
+end
+
+-- Завантажуємо та запускаємо
+local desktop_func, load_err = loadfile("/system/desktop.lua")
+if not desktop_func then
+  error("Cannot load desktop: " .. tostring(load_err))
+end
+
+local ok, run_err = pcall(desktop_func)
+if not ok then
+  error("Desktop crashed: " .. tostring(run_err))
+end
+
+-- Якщо desktop завершився - shutdown
+print("Desktop exited")
+os.sleep(2)
+computer.shutdown()
