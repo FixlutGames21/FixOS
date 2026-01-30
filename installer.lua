@@ -211,24 +211,40 @@ local function formatDisk(addr)
   if not proxy then return false, "Cannot access disk" end
   
   local function removeRecursive(path)
+    -- Перевірка валідності шляху
+    if not path or path == "" or path == "/" then 
+      return 
+    end
+    
     local ok, isDir = pcall(proxy.isDirectory, path)
     if ok and isDir then
-      local ok2, files = pcall(proxy.list, path)
-      if ok2 and files then
-        for file in files do
-          removeRecursive(path .. "/" .. file)
+      -- Це директорія - рекурсивно видаляємо вміст
+      local ok2, listFunc = pcall(function() return proxy.list(path) end)
+      if ok2 and listFunc and type(listFunc) == "function" then
+        for file in listFunc do
+          if file and file ~= "" and file ~= "." and file ~= ".." then
+            local fullPath = path
+            if not fullPath:match("/$") then
+              fullPath = fullPath .. "/"
+            end
+            fullPath = fullPath .. file
+            removeRecursive(fullPath)
+          end
         end
       end
       pcall(proxy.remove, path)
     else
+      -- Це файл - просто видаляємо
       pcall(proxy.remove, path)
     end
   end
   
-  local ok, files = pcall(proxy.list, "/")
-  if ok and files then
-    for file in files do
-      if file ~= "/" then
+  -- Отримуємо список файлів у корені
+  local ok, listResult = pcall(function() return proxy.list("/") end)
+  if ok and listResult and type(listResult) == "function" then
+    -- listResult - це ітератор-функція
+    for file in listResult do
+      if file and file ~= "" and file ~= "/" and file ~= "." and file ~= ".." then
         removeRecursive("/" .. file)
       end
     end
