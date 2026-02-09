@@ -1,5 +1,5 @@
 -- ==============================================
--- FixOS 2.0 - My Computer (FIXED)
+-- FixOS 2.0 - My Computer (ВИПРАВЛЕНО)
 -- system/programs/mycomputer.lua
 -- ==============================================
 

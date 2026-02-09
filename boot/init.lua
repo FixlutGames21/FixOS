@@ -1,15 +1,11 @@
 -- ==============================================
--- FixOS 2.0 - boot/init.lua (FIXED)
+-- FixOS 2.0 - boot/init.lua (ВИПРАВЛЕНО)
 -- Правильний bootloader для OpenComputers
 -- ==============================================
 
 -- На момент запуску boot/init.lua доступні ТІЛЬКИ:
 -- - component (raw API)
 -- - computer (raw API)
--- Нічого іншого! Навіть print() не існує.
-
-local component = component
-local computer = computer
 
 -- ====================
 -- ЕТАП 1: Базова ініціалізація GPU
@@ -55,6 +51,9 @@ if gpu_addr and screen_addr then
   
   safeInvoke(gpu_addr, "set", 2, 1, "FixOS 2.0 - Booting...")
   currentY = 3
+  
+  -- Debug beep
+  computer.beep(400, 0.1)
 end
 
 -- ====================
@@ -134,7 +133,7 @@ _G.component = component_api
 bootPrint("Mounting filesystem...")
 
 local boot_fs_addr = computer.getBootAddress()
-local boot_fs = component.proxy(boot_fs_addr)
+local boot_fs = component_api.proxy(boot_fs_addr)
 
 if not boot_fs then
   error("Cannot access boot filesystem!")
@@ -234,7 +233,6 @@ end
 
 -- Додаємо базовий os.date
 _G.os.date = function(format, time)
-  -- Спрощена версія - просто повертаємо час
   time = time or os.time()
   if format == "%H:%M" then
     local hours = math.floor((time / 3600) % 24)
@@ -268,6 +266,13 @@ end
 
 local ok, run_err = pcall(desktop_func)
 if not ok then
+  -- Зберігаємо помилку в лог
+  local handle = boot_fs.open("/error.log", "w")
+  if handle then
+    boot_fs.write(handle, "Desktop error: " .. tostring(run_err))
+    boot_fs.close(handle)
+  end
+  
   error("Desktop crashed: " .. tostring(run_err))
 end
 

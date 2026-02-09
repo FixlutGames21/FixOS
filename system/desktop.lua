@@ -1,13 +1,7 @@
 -- ==============================================
--- FixOS 2.0 - system/desktop.lua (FIXED)
+-- FixOS 2.0 - system/desktop.lua (ВИПРАВЛЕНО)
 -- Робочий стіл з правильною ініціалізацією
 -- ==============================================
-
--- На цьому етапі вже доступні:
--- component, computer, require, print, error, loadfile, dofile
-
-local component = component
-local computer = computer
 
 -- ====================
 -- Перевірка базових компонентів
@@ -79,6 +73,11 @@ local function loadProgram(name)
   local ok, module = pcall(func)
   if not ok then
     return nil, "Init error: " .. tostring(module)
+  end
+  
+  -- ВИПРАВЛЕННЯ: Перевіряємо, що модуль - це таблиця
+  if type(module) ~= "table" then
+    return nil, "Program must return a table/module"
   end
   
   return module

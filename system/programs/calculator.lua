@@ -1,5 +1,5 @@
 -- ==============================================
--- FixOS 2.0 - Calculator (FIXED)
+-- FixOS 2.0 - Calculator (ВИПРАВЛЕНО)
 -- system/programs/calculator.lua
 -- ==============================================
 
@@ -185,7 +185,7 @@ function calc.calculate(win)
     if current ~= 0 then
       result = win.lastNum / current
     else
-      win.display = "Error"
+      win.display = "Error: Div/0"
       win.operation = nil
       win.newNumber = true
       return

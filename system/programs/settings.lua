@@ -1,5 +1,5 @@
 -- ==============================================
--- FixOS 2.0 - Settings (FIXED)
+-- FixOS 2.0 - Settings (ВИПРАВЛЕНО)
 -- system/programs/settings.lua
 -- ==============================================
 
@@ -9,7 +9,7 @@ local settings = {}
 function settings.init(win)
   win.selectedTab = 1
   win.tabs = {"System", "About"}
-  win.version = "2.0"
+  win.version = "2.0.0"
   
   -- Завантаження версії з файлу
   local fs = component.proxy(computer.getBootAddress())

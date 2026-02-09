@@ -1,5 +1,5 @@
 -- ==============================================
--- FixOS 2.0 Installer (FIXED)
+-- FixOS 2.0 Installer (ВИПРАВЛЕНО)
 -- Покращена версія з правильною структурою
 -- ==============================================
 
@@ -209,6 +209,12 @@ end
 local function formatDisk(addr)
   local proxy = component.proxy(addr)
   if not proxy then return false, "Cannot access disk" end
+  
+  -- ВИПРАВЛЕННЯ: Перевірка read-only
+  local ok, ro = pcall(proxy.isReadOnly)
+  if ok and ro then
+    return false, "Disk is read-only"
+  end
   
   local function removeRecursive(path)
     -- Перевірка валідності шляху

@@ -1,5 +1,5 @@
 -- ==============================================
--- FixOS 2.0 - Notepad (FIXED)
+-- FixOS 2.0 - Notepad (ВИПРАВЛЕНО)
 -- system/programs/notepad.lua
 -- ==============================================
 
@@ -196,8 +196,8 @@ function notepad.key(win, char, code)
     win.cursorCol = #win.lines[win.cursorLine] + 1
     return true
     
-  elseif char and char >= 32 and char < 127 then
-    -- Друкований символ
+  elseif char and char >= 32 and char <= 255 then
+    -- Друкований символ (ВИПРАВЛЕНО: розширено діапазон)
     local line = win.lines[win.cursorLine]
     
     win.lines[win.cursorLine] = line:sub(1, win.cursorCol - 1) .. 
