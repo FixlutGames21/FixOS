@@ -39,7 +39,7 @@ local COLOR = {
 
 -- СПИСОК ФАЙЛІВ ДЛЯ ЗАВАНТАЖЕННЯ
 local FILES = {
-  {path = "boot/init.lua", target = "/boot/init.lua"},
+  {path = "init.lua", target = "/init.lua"},
   {path = "system/desktop.lua", target = "/system/desktop.lua"},
   {path = "system/programs/calculator.lua", target = "/system/programs/calculator.lua"},
   {path = "system/programs/notepad.lua", target = "/system/programs/notepad.lua"},
