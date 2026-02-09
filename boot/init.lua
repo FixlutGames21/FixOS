@@ -1,11 +1,11 @@
 -- ==============================================
--- FixOS 2.0 - boot/init.lua (ВИПРАВЛЕНО)
+-- FixOS 2.0 - boot/init.lua (ОСТАТОЧНО ВИПРАВЛЕНО)
 -- Правильний bootloader для OpenComputers
 -- ==============================================
 
--- На момент запуску boot/init.lua доступні ТІЛЬКИ:
--- - component (raw API)
--- - computer (raw API)
+-- КРИТИЧНО ВАЖЛИВО: В OpenComputers boot/init.lua вже має доступ до component та computer
+-- НЕ ТРЕБА робити local component = component!
+-- Просто використовуємо їх напряму
 
 -- ====================
 -- ЕТАП 1: Базова ініціалізація GPU
