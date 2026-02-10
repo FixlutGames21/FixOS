@@ -630,9 +630,13 @@ local function mainLoop()
               local relX = x - win.x - 1
               local relY = y - win.y - 2
               
-              local ok, needRedraw = safeCall(win.click, win, relX, relY, button)
-              if ok and needRedraw then
-                redrawAll()
+              -- ПОКРАЩЕННЯ: Спочатку перевіряємо чи є метод scroll
+              if button == 1 then
+                -- Звичайний клік
+                local ok, needRedraw = safeCall(win.click, win, relX, relY, button)
+                if ok and needRedraw then
+                  redrawAll()
+                end
               end
             end
             
@@ -672,6 +676,27 @@ local function mainLoop()
       
     elseif eventType == "drop" then
       state.dragWindow = nil
+      
+    elseif eventType == "scroll" then
+      -- Підтримка прокрутки колесом миші
+      local _, _, x, y, direction = table.unpack(eventData)
+      
+      if state.focusedWindow and state.activeWindows[state.focusedWindow] then
+        local win = state.activeWindows[state.focusedWindow]
+        
+        -- Перевіряємо чи клік всередині вікна
+        if x >= win.x and x < win.x + win.w and
+           y >= win.y and y < win.y + win.h then
+          
+          -- Викликаємо scroll метод програми якщо він є
+          if win.program and win.program.scroll then
+            local ok, needRedraw = safeCall(win.program.scroll, win, direction)
+            if ok and needRedraw then
+              redrawAll()
+            end
+          end
+        end
+      end
       
     elseif eventType == "key_down" then
       local _, _, char, code = table.unpack(eventData)

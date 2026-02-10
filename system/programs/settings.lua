@@ -549,66 +549,76 @@ function settings.draw(win, gpu, x, y, w, h)
 end
 
 function settings.click(win, x, y, button)
-  local contentH = 17  -- Має відповідати draw
-  local contentW = 56
-  local cx = 2
-  local scrollbarX = 58
+  -- x, y - це вже ВІДНОСНІ координати від початку контенту вікна
+  -- НЕ треба їх додатково конвертувати!
   
-  -- Клік по вкладках
+  local contentH = 17
+  local contentW = 56
+  local scrollbarX = contentW + 2  -- Відносна позиція scrollbar
+  
+  -- Клік по вкладках (відносно початку вікна, y=0 це верх вікна)
   local tabX = 0
   for i, tab in ipairs(win.tabs) do
-    if x >= tabX and x < tabX + 13 and y >= 0 and y < 3 then
+    if x >= tabX and x < tabX + 13 and y >= -2 and y < 1 then
       win.selectedTab = i
-      win.scrollY = 0  -- Скидаємо scroll при зміні вкладки
+      win.scrollY = 0
       return true
     end
     tabX = tabX + 14
   end
   
-  -- Клік по scrollbar
-  if x >= scrollbarX and x < scrollbarX + 1 and y >= 3 and y < 3 + contentH then
-    if y == 3 then
+  -- Клік по scrollbar (відносно контенту)
+  if x >= scrollbarX and x <= scrollbarX and y >= 1 and y < 1 + contentH then
+    local relY = y - 1
+    
+    if relY == 0 then
       -- Кнопка вгору
       win.scrollY = math.max(0, win.scrollY - 1)
       return true
-    elseif y == 3 + contentH - 1 then
+    elseif relY == contentH - 1 then
       -- Кнопка вниз
       win.scrollY = math.min(win.maxScrollY, win.scrollY + 1)
       return true
     else
       -- Клік по треку
-      local relY = y - 3
-      local pct = relY / contentH
-      win.scrollY = math.floor(win.maxScrollY * pct)
+      if win.maxScrollY > 0 then
+        local pct = relY / contentH
+        win.scrollY = math.floor(win.maxScrollY * pct)
+      end
       return true
     end
   end
   
-  -- Враховуємо scroll для кліків по контенту
-  local adjustedY = y + win.scrollY
+  -- Клік по контенту - враховуємо scroll
+  local contentY = y - 1  -- y=1 це перший рядок контенту
+  local adjustedY = contentY + win.scrollY + 2  -- +2 для компенсації заголовка
   
   -- Клік по роздільності (вкладка Display)
   if win.selectedTab == 2 then
     for i, res in ipairs(win.resolutions) do
       local btn = win["res_" .. i]
-      if btn and x >= btn.x and x < btn.x + btn.w and 
-         adjustedY >= btn.y and adjustedY < btn.y + btn.h then
-        -- Застосовуємо роздільність
-        local gpu = component.proxy(component.list("gpu")())
-        gpu.setResolution(btn.res.w, btn.res.h)
-        win.currentW, win.currentH = gpu.getResolution()
+      if btn then
+        -- btn.y вже враховує scroll offset
+        local btnScreenY = btn.y - win.scrollY - 2
         
-        -- Зберігаємо в конфіг
-        local fs = component.proxy(computer.getBootAddress())
-        local handle = fs.open("/settings.cfg", "w")
-        if handle then
-          fs.write(handle, string.format("resolution=%dx%d\n", win.currentW, win.currentH))
-          fs.close(handle)
+        if x >= btn.x and x < btn.x + btn.w and 
+           contentY >= btnScreenY and contentY < btnScreenY + btn.h then
+          -- Застосовуємо роздільність
+          local gpu = component.proxy(component.list("gpu")())
+          gpu.setResolution(btn.res.w, btn.res.h)
+          win.currentW, win.currentH = gpu.getResolution()
+          
+          -- Зберігаємо в конфіг
+          local fs = component.proxy(computer.getBootAddress())
+          local handle = fs.open("/settings.cfg", "w")
+          if handle then
+            fs.write(handle, string.format("resolution=%dx%d\n", win.currentW, win.currentH))
+            fs.close(handle)
+          end
+          
+          computer.shutdown(true)
+          return true
         end
-        
-        -- Перезавантаження системи
-        computer.shutdown(true)
-        return true
       end
     end
   end
@@ -616,11 +626,49 @@ function settings.click(win, x, y, button)
   -- Клік по кнопці оновлення (вкладка Update)
   if win.selectedTab == 3 and win.updateButton then
     local btn = win.updateButton
+    local btnScreenY = btn.y - win.scrollY - 2
+    
     if x >= btn.x and x < btn.x + btn.w and 
-       adjustedY >= btn.y and adjustedY < btn.y + btn.h then
+       contentY >= btnScreenY and contentY < btnScreenY + btn.h then
       settings.checkUpdates(win)
       return true
     end
+  end
+  
+  return false
+end
+
+-- Підтримка клавіатури для прокрутки
+function settings.key(win, char, code)
+  -- Page Up (код 201)
+  if code == 201 then
+    win.scrollY = math.max(0, win.scrollY - 5)
+    return true
+  
+  -- Page Down (код 209)
+  elseif code == 209 then
+    win.scrollY = math.min(win.maxScrollY, win.scrollY + 5)
+    return true
+  
+  -- Home (код 199)
+  elseif code == 199 then
+    win.scrollY = 0
+    return true
+  
+  -- End (код 207)
+  elseif code == 207 then
+    win.scrollY = win.maxScrollY
+    return true
+  
+  -- Стрілка вгору (код 200)
+  elseif code == 200 then
+    win.scrollY = math.max(0, win.scrollY - 1)
+    return true
+  
+  -- Стрілка вниз (код 208)
+  elseif code == 208 then
+    win.scrollY = math.min(win.maxScrollY, win.scrollY + 1)
+    return true
   end
   
   return false
