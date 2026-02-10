@@ -265,10 +265,7 @@ local function drawTaskbar()
 end
 
 local function drawDesktop()
-  if not needsRedraw("desktop") and not state.needsFullRedraw then 
-    return 
-  end
-  
+  -- ВИПРАВЛЕННЯ: Завжди малюємо фон при будь-яких змінах
   gpu.setBackground(COLORS.desktop)
   gpu.fill(1, 1, w, h - 1, " ")
   
@@ -472,6 +469,9 @@ local function closeWindow(index)
     elseif state.focusedWindow > index then
       state.focusedWindow = state.focusedWindow - 1
     end
+    
+    -- ВИПРАВЛЕННЯ: Повне перемалювання після закриття
+    state.needsFullRedraw = true
   end
 end
 
