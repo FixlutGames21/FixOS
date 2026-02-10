@@ -46,35 +46,46 @@ end
 
 -- Малювання калькулятора
 function calc.draw(win, gpu, x, y, w, h)
-  -- Дисплей
-  gpu.setBackground(0xFFFFFF)
-  gpu.setForeground(0x000000)
-  gpu.fill(x + 1, y, w - 2, 2, " ")
+  -- Дисплей (покращений з градієнтом)
+  gpu.setBackground(0x1A1A1A)
+  gpu.setForeground(0x00FF00)
+  gpu.fill(x + 1, y, w - 2, 3, " ")
   
   -- Рамка дисплею (3D ефект)
-  gpu.setForeground(0x808080)
+  gpu.setForeground(0x404040)
   for i = 0, w - 3 do
     gpu.set(x + 1 + i, y, "▄")
-    gpu.set(x + 1 + i, y + 1, "▀")
+    gpu.set(x + 1 + i, y + 2, "▀")
   end
   
-  -- Текст на дисплеї
+  -- Текст на дисплеї (зелений, як на старих калькуляторах)
   local dispText = tostring(win.display)
-  if #dispText > w - 4 then 
-    dispText = dispText:sub(1, w - 4) 
+  if #dispText > w - 6 then 
+    dispText = dispText:sub(1, w - 6) 
   end
   
-  gpu.setForeground(0x000000)
-  gpu.setBackground(0xFFFFFF)
+  gpu.setForeground(0x00FF00)
+  gpu.setBackground(0x1A1A1A)
   -- Вирівнюємо текст праворуч
-  local textX = x + w - 2 - #dispText
+  local textX = x + w - 3 - #dispText
   gpu.set(textX, y + 1, dispText)
   
-  -- Малюємо кнопки
-  gpu.setBackground(0xC0C0C0)
-  
+  -- Малюємо кнопки (покращені)
   for _, btn in ipairs(win.buttons) do
+    -- Колір кнопки залежить від типу
+    local btnColor
+    if btn.v == "C" then
+      btnColor = 0xFF5555 -- Червона для Clear
+    elseif btn.v == "=" then
+      btnColor = 0x00AA00 -- Зелена для =
+    elseif btn.v == "+" or btn.v == "-" or btn.v == "*" or btn.v == "/" then
+      btnColor = 0xFFAA00 -- Помаранчева для операцій
+    else
+      btnColor = 0xD3D3D3 -- Світло-сіра для цифр
+    end
+    
     -- Фон кнопки
+    gpu.setBackground(btnColor)
     gpu.fill(x + btn.x, y + btn.y, btn.w, btn.h, " ")
     
     -- 3D ефект (підняті краї)
@@ -86,7 +97,7 @@ function calc.draw(win, gpu, x, y, w, h)
       gpu.set(x + btn.x, y + btn.y + i, "▌") 
     end
     
-    gpu.setForeground(0x808080)
+    gpu.setForeground(0x404040)
     for i = 0, btn.w - 1 do 
       gpu.set(x + btn.x + i, y + btn.y + btn.h - 1, "▄") 
     end
@@ -94,8 +105,9 @@ function calc.draw(win, gpu, x, y, w, h)
       gpu.set(x + btn.x + btn.w - 1, y + btn.y + i, "▐") 
     end
     
-    -- Текст кнопки (центруємо)
+    -- Текст кнопки (центруємо, чорний для контрасту)
     gpu.setForeground(0x000000)
+    gpu.setBackground(btnColor)
     local tx = x + btn.x + math.floor((btn.w - #btn.t) / 2)
     local ty = y + btn.y + math.floor(btn.h / 2)
     gpu.set(tx, ty, btn.t)
