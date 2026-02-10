@@ -1,7 +1,6 @@
 -- ==============================================
--- FixOS 2.0 - Settings (ПОКРАЩЕНО)
+-- FixOS 2.1.1 - Settings (WINDOWS STYLE + SCROLLBAR)
 -- system/programs/settings.lua
--- Додано: зміна роздільності, оновлення системи
 -- ==============================================
 
 local settings = {}
@@ -9,9 +8,11 @@ local settings = {}
 function settings.init(win)
   win.selectedTab = 1
   win.tabs = {"System", "Display", "Update", "About"}
-  win.version = "2.0.0"
+  win.version = "2.1.1"
   win.updateStatus = "Ready"
   win.updateProgress = 0
+  win.scrollY = 0  -- Позиція прокрутки
+  win.maxScrollY = 0  -- Максимальна прокрутка
   
   -- Завантаження версії
   local fs = component.proxy(computer.getBootAddress())
@@ -29,11 +30,11 @@ function settings.init(win)
   
   -- Доступні роздільності
   win.resolutions = {
-    {w = 50, h = 16, name = "Small (50x16)"},
-    {w = 80, h = 25, name = "Medium (80x25)"},
-    {w = 100, h = 30, name = "Large (100x30)"},
-    {w = 120, h = 40, name = "Extra Large (120x40)"},
-    {w = 160, h = 50, name = "Maximum (160x50)"}
+    {w = 50, h = 16, name = "Small", desc = "Low-end systems"},
+    {w = 80, h = 25, name = "Medium", desc = "Recommended"},
+    {w = 100, h = 30, name = "Large", desc = "High resolution"},
+    {w = 120, h = 40, name = "Extra Large", desc = "Advanced"},
+    {w = 160, h = 50, name = "Maximum", desc = "Top tier GPU"}
   }
   
   -- Поточна роздільність
@@ -42,8 +43,125 @@ function settings.init(win)
   win.maxW, win.maxH = gpu.maxResolution()
 end
 
+-- Малювання Windows-style групи
+local function drawGroup(gpu, x, y, w, h, title)
+  -- Рамка групи (3D)
+  gpu.setBackground(0xFFFFFF)
+  gpu.setForeground(0x808080)
+  
+  -- Верхня лінія (з розривом для заголовку)
+  local titleLen = #title + 2
+  local leftLen = 3
+  
+  gpu.set(x, y, "┌" .. string.rep("─", leftLen))
+  gpu.set(x + leftLen + titleLen + 1, y, string.rep("─", w - leftLen - titleLen - 2) .. "┐")
+  
+  -- Заголовок
+  gpu.setForeground(0x000080)
+  gpu.set(x + leftLen + 1, y, " " .. title .. " ")
+  
+  -- Бокові лінії
+  gpu.setForeground(0x808080)
+  for i = 1, h - 2 do
+    gpu.set(x, y + i, "│")
+    gpu.set(x + w - 1, y + i, "│")
+  end
+  
+  -- Нижня лінія
+  gpu.set(x, y + h - 1, "└" .. string.rep("─", w - 2) .. "┘")
+end
+
+-- Малювання прогрес бару (Windows-style)
+local function drawProgressBar(gpu, x, y, w, percent, color)
+  -- Рамка
+  gpu.setBackground(0xFFFFFF)
+  gpu.setForeground(0x808080)
+  gpu.set(x, y, "▐")
+  gpu.set(x + w - 1, y, "▌")
+  
+  -- Фон бару
+  gpu.setBackground(0xC0C0C0)
+  gpu.fill(x + 1, y, w - 2, 1, " ")
+  
+  -- Заповнення
+  local filled = math.floor((w - 2) * percent)
+  if filled > 0 then
+    gpu.setBackground(color or 0x0000AA)
+    gpu.fill(x + 1, y, filled, 1, " ")
+  end
+  
+  -- Відсоток
+  gpu.setBackground(0xFFFFFF)
+  gpu.setForeground(0x000000)
+  local pctText = string.format("%d%%", math.floor(percent * 100))
+  local pctX = x + math.floor((w - #pctText) / 2)
+  gpu.set(pctX, y, pctText)
+end
+
+-- Малювання кнопки (Windows-style)
+local function drawButton(gpu, x, y, w, label, enabled, pressed)
+  local bgColor = enabled and 0xC0C0C0 or 0xA0A0A0
+  
+  gpu.setBackground(bgColor)
+  gpu.fill(x, y, w, 3, " ")
+  
+  if not pressed then
+    -- Підняті краї
+    gpu.setForeground(0xFFFFFF)
+    gpu.fill(x, y, w, 1, "▀")
+    gpu.fill(x, y, 1, 3, "▌")
+    
+    gpu.setForeground(0x404040)
+    gpu.fill(x, y + 2, w, 1, "▄")
+    gpu.fill(x + w - 1, y, 1, 3, "▐")
+  else
+    -- Натиснуті краї
+    gpu.setForeground(0x404040)
+    gpu.fill(x, y, w, 1, "▀")
+    gpu.fill(x, y, 1, 3, "▌")
+    
+    gpu.setForeground(0xFFFFFF)
+    gpu.fill(x, y + 2, w, 1, "▄")
+    gpu.fill(x + w - 1, y, 1, 3, "▐")
+  end
+  
+  -- Текст
+  gpu.setForeground(enabled and 0x000000 or 0x808080)
+  gpu.setBackground(bgColor)
+  local tx = x + math.floor((w - #label) / 2)
+  gpu.set(tx, y + 1, label)
+end
+
+-- Малювання scrollbar
+local function drawScrollbar(gpu, x, y, h, scrollY, maxScrollY)
+  if maxScrollY <= 0 then return end
+  
+  -- Трек scrollbar
+  gpu.setBackground(0xC0C0C0)
+  gpu.fill(x, y, 1, h, "░")
+  
+  -- Розмір та позиція thumb
+  local thumbH = math.max(2, math.floor(h * 0.3))
+  local trackH = h - thumbH
+  local thumbY = y + math.floor((scrollY / maxScrollY) * trackH)
+  
+  -- Thumb (повзунок)
+  gpu.setBackground(0x808080)
+  gpu.fill(x, thumbY, 1, thumbH, "█")
+  
+  -- Кнопки вгору/вниз
+  gpu.setBackground(0xC0C0C0)
+  gpu.setForeground(0x000000)
+  gpu.set(x, y, "▲")
+  gpu.set(x, y + h - 1, "▼")
+end
+
 function settings.draw(win, gpu, x, y, w, h)
-  -- Вкладки
+  local contentH = h - 3  -- Висота контенту
+  local scrollbarW = 1    -- Ширина scrollbar
+  local contentW = w - scrollbarW - 1  -- Ширина контенту
+  
+  -- Вкладки (як у Windows)
   gpu.setBackground(0xC0C0C0)
   local tabX = x
   
@@ -51,242 +169,430 @@ function settings.draw(win, gpu, x, y, w, h)
     local isActive = (win.selectedTab == i)
     local tabW = 13
     
-    gpu.setBackground(isActive and 0xFFFFFF or 0xA0A0A0)
-    gpu.setForeground(0x000000)
-    gpu.fill(tabX, y, tabW, 2, " ")
-    
+    -- Фон вкладки
     if isActive then
-      gpu.setForeground(0xFFFFFF)
-      for k = 0, tabW - 1 do 
-        gpu.set(tabX + k, y, "▀") 
-      end
+      gpu.setBackground(0xFFFFFF)
+      gpu.fill(tabX, y, tabW, 3, " ")
+      
+      -- Рамка активної вкладки
+      gpu.setForeground(0x808080)
+      gpu.set(tabX, y, "╔" .. string.rep("═", tabW - 2) .. "╗")
+      gpu.set(tabX, y + 1, "║")
+      gpu.set(tabX + tabW - 1, y + 1, "║")
+      -- Низ злитий з контентом
+      
+      gpu.setForeground(0x000000)
+      gpu.setBackground(0xFFFFFF)
+    else
+      gpu.setBackground(0xD0D0D0)
+      gpu.fill(tabX, y + 1, tabW, 2, " ")
+      
+      -- Рамка неактивної вкладки
+      gpu.setForeground(0x808080)
+      gpu.set(tabX, y + 1, "┌" .. string.rep("─", tabW - 2) .. "┐")
+      gpu.set(tabX, y + 2, "│")
+      gpu.set(tabX + tabW - 1, y + 2, "│")
+      
+      gpu.setForeground(0x606060)
+      gpu.setBackground(0xD0D0D0)
     end
     
-    gpu.setForeground(0x000000)
     local labelX = tabX + math.floor((tabW - #tab) / 2)
-    gpu.set(labelX, y + 1, tab)
+    gpu.set(labelX, y + (isActive and 1 or 2), tab)
     tabX = tabX + tabW + 1
   end
   
-  -- Вміст вкладки
+  -- Фон контенту
   gpu.setBackground(0xFFFFFF)
-  gpu.fill(x, y + 3, w, h - 3, " ")
+  gpu.fill(x, y + 3, contentW, contentH, " ")
+  
+  -- Рамка навколо контенту
+  gpu.setForeground(0x808080)
+  gpu.set(x, y + 2, "╔" .. string.rep("═", contentW - 1) .. "╗")
+  for i = 1, contentH - 1 do
+    gpu.set(x, y + 2 + i, "║")
+    gpu.set(x + contentW, y + 2 + i, "║")
+  end
+  gpu.set(x, y + 2 + contentH, "╚" .. string.rep("═", contentW - 1) .. "╝")
+  
+  -- Scrollbar
+  drawScrollbar(gpu, x + w - 1, y + 3, contentH, win.scrollY, win.maxScrollY)
+  
+  -- Малювання контенту вкладки з урахуванням scroll
+  local cy = y + 4 - win.scrollY
+  local cx = x + 2
+  local cw = contentW - 4
+  
+  gpu.setBackground(0xFFFFFF)
   gpu.setForeground(0x000000)
   
   -- ============ ВКЛАДКА SYSTEM ============
   if win.selectedTab == 1 then
+    -- Заголовок
     gpu.setForeground(0x000080)
-    gpu.set(x + 2, y + 5, "╔═══════════════════════════╗")
-    gpu.set(x + 2, y + 6, "║  Operating System: FixOS  ║")
-    gpu.set(x + 2, y + 7, "╚═══════════════════════════╝")
+    gpu.setBackground(0xFFFFFF)
+    if cy >= y + 3 and cy < y + 3 + contentH then
+      gpu.set(cx, cy, "System Information")
+    end
+    cy = cy + 2
     
-    gpu.setForeground(0x000000)
-    gpu.set(x + 2, y + 9, "Version: " .. win.version)
-    gpu.set(x + 2, y + 10, "Author: FixlutGames21")
-    gpu.set(x + 2, y + 11, "Architecture: Lua 5.3")
+    -- Група "Operating System"
+    if cy + 4 >= y + 3 then
+      drawGroup(gpu, cx, cy, cw, 5, "Operating System")
+    end
+    cy = cy + 1
     
-    -- Пам'ять
+    if cy >= y + 3 and cy < y + 3 + contentH then
+      gpu.setForeground(0x000000)
+      gpu.set(cx + 2, cy, "Name:")
+      gpu.setForeground(0x000080)
+      gpu.set(cx + 15, cy, "FixOS")
+    end
+    cy = cy + 1
+    
+    if cy >= y + 3 and cy < y + 3 + contentH then
+      gpu.setForeground(0x000000)
+      gpu.set(cx + 2, cy, "Version:")
+      gpu.setForeground(0x000080)
+      gpu.set(cx + 15, cy, win.version)
+    end
+    cy = cy + 1
+    
+    if cy >= y + 3 and cy < y + 3 + contentH then
+      gpu.setForeground(0x000000)
+      gpu.set(cx + 2, cy, "Architecture:")
+      gpu.setForeground(0x000080)
+      gpu.set(cx + 15, cy, "Lua 5.3")
+    end
+    cy = cy + 3
+    
+    -- Група "Memory"
     local totalMem = computer.totalMemory()
     local freeMem = computer.freeMemory()
     local usedMem = totalMem - freeMem
-    
-    gpu.setForeground(0x000080)
-    gpu.set(x + 2, y + 13, "═══ Memory Usage ═══")
-    
-    gpu.setForeground(0x000000)
-    gpu.set(x + 2, y + 14, string.format("%dKB / %dKB used", 
-            math.floor(usedMem / 1024), math.floor(totalMem / 1024)))
-    
-    -- Прогрес бар пам'яті (покращений)
     local memPct = usedMem / totalMem
-    local barW = math.min(w - 6, 35)
-    local filled = math.floor(barW * memPct)
     
-    gpu.set(x + 3, y + 15, "╔")
-    gpu.set(x + 4 + barW, y + 15, "╗")
-    
-    local barColor
-    if memPct > 0.8 then
-      barColor = 0xFF0000
-    elseif memPct > 0.6 then
-      barColor = 0xFFAA00
-    else
-      barColor = 0x00AA00
+    if cy + 5 >= y + 3 then
+      drawGroup(gpu, cx, cy, cw, 6, "Memory")
     end
+    cy = cy + 1
     
-    gpu.setForeground(barColor)
-    for i = 1, filled do
-      gpu.set(x + 3 + i, y + 15, "█")
+    if cy >= y + 3 and cy < y + 3 + contentH then
+      gpu.setForeground(0x000000)
+      gpu.set(cx + 2, cy, string.format("Total: %d KB", math.floor(totalMem / 1024)))
     end
+    cy = cy + 1
     
-    gpu.setForeground(0xCCCCCC)
-    for i = filled + 1, barW do
-      gpu.set(x + 3 + i, y + 15, "░")
+    if cy >= y + 3 and cy < y + 3 + contentH then
+      gpu.set(cx + 2, cy, string.format("Used:  %d KB", math.floor(usedMem / 1024)))
     end
+    cy = cy + 1
     
-    gpu.setForeground(0x000000)
-    gpu.set(x + 6 + barW, y + 15, string.format(" %.0f%%", memPct * 100))
+    if cy >= y + 3 and cy < y + 3 + contentH then
+      gpu.set(cx + 2, cy, string.format("Free:  %d KB", math.floor(freeMem / 1024)))
+    end
+    cy = cy + 1
     
-    -- Енергія
+    if cy >= y + 3 and cy < y + 3 + contentH then
+      local barColor = memPct > 0.8 and 0xFF0000 or (memPct > 0.6 and 0xFFAA00 or 0x0000AA)
+      drawProgressBar(gpu, cx + 2, cy, cw - 4, memPct, barColor)
+    end
+    cy = cy + 3
+    
+    -- Група "Power"
     local energy = computer.energy()
     local maxEnergy = computer.maxEnergy()
+    local energyPct = energy / maxEnergy
     
-    gpu.setForeground(0x000080)
-    gpu.set(x + 2, y + 17, "═══ Power Status ═══")
-    gpu.setForeground(0x000000)
-    gpu.set(x + 2, y + 18, string.format("⚡ %d / %d", 
-            math.floor(energy), math.floor(maxEnergy)))
+    if cy + 4 >= y + 3 then
+      drawGroup(gpu, cx, cy, cw, 5, "Power Status")
+    end
+    cy = cy + 1
+    
+    if cy >= y + 3 and cy < y + 3 + contentH then
+      gpu.setForeground(0x000000)
+      gpu.set(cx + 2, cy, string.format("⚡ Energy: %d / %d", math.floor(energy), math.floor(maxEnergy)))
+    end
+    cy = cy + 1
+    
+    if cy >= y + 3 and cy < y + 3 + contentH then
+      drawProgressBar(gpu, cx + 2, cy, cw - 4, energyPct, 0xFFAA00)
+    end
+    cy = cy + 1
+    
+    if cy >= y + 3 and cy < y + 3 + contentH then
+      gpu.setForeground(0x606060)
+      gpu.set(cx + 2, cy, "Uptime: " .. math.floor(computer.uptime()) .. "s")
+    end
+    
+    win.maxScrollY = math.max(0, cy - (y + 3 + contentH) + 5)
   
   -- ============ ВКЛАДКА DISPLAY ============
   elseif win.selectedTab == 2 then
     gpu.setForeground(0x000080)
-    gpu.set(x + 2, y + 5, "╔══════════════════════════════╗")
-    gpu.set(x + 2, y + 6, "║  Display Settings            ║")
-    gpu.set(x + 2, y + 7, "╚══════════════════════════════╝")
+    if cy >= y + 3 and cy < y + 3 + contentH then
+      gpu.set(cx, cy, "Display Settings")
+    end
+    cy = cy + 2
     
-    gpu.setForeground(0x000000)
-    gpu.set(x + 2, y + 9, string.format("Current: %dx%d", win.currentW, win.currentH))
-    gpu.set(x + 2, y + 10, string.format("Maximum: %dx%d", win.maxW, win.maxH))
+    -- Поточна роздільність
+    if cy + 3 >= y + 3 then
+      drawGroup(gpu, cx, cy, cw, 4, "Current Resolution")
+    end
+    cy = cy + 1
     
-    gpu.setForeground(0x000080)
-    gpu.set(x + 2, y + 12, "Available Resolutions:")
+    if cy >= y + 3 and cy < y + 3 + contentH then
+      gpu.setForeground(0x000000)
+      gpu.set(cx + 2, cy, string.format("Active: %dx%d pixels", win.currentW, win.currentH))
+    end
+    cy = cy + 1
     
-    -- Список роздільностей
-    local startY = y + 13
+    if cy >= y + 3 and cy < y + 3 + contentH then
+      gpu.setForeground(0x606060)
+      gpu.set(cx + 2, cy, string.format("Maximum: %dx%d pixels", win.maxW, win.maxH))
+    end
+    cy = cy + 3
+    
+    -- Доступні роздільності
+    if cy >= y + 3 and cy < y + 3 + contentH then
+      gpu.setForeground(0x000080)
+      gpu.set(cx, cy, "Available Resolutions:")
+    end
+    cy = cy + 2
+    
     for i, res in ipairs(win.resolutions) do
       if res.w <= win.maxW and res.h <= win.maxH then
         local isCurrent = (res.w == win.currentW and res.h == win.currentH)
         
-        -- Кнопка
-        local btnY = startY + (i - 1) * 2
-        if btnY < y + h - 2 then
-          gpu.setBackground(isCurrent and 0x00AA00 or 0xD3D3D3)
+        if cy >= y + 3 and cy < y + 3 + contentH then
+          -- Радіо кнопка
           gpu.setForeground(0x000000)
-          gpu.fill(x + 4, btnY, w - 8, 1, " ")
+          gpu.set(cx + 2, cy, isCurrent and "◉" or "○")
           
-          local marker = isCurrent and "● " or "○ "
-          gpu.set(x + 5, btnY, marker .. res.name)
+          -- Назва
+          gpu.setForeground(isCurrent and 0x0000AA or 0x000000)
+          gpu.set(cx + 5, cy, string.format("%s (%dx%d)", res.name, res.w, res.h))
           
-          -- Зберігаємо координати для кліку
-          win["res_" .. i] = {x = x + 4, y = btnY, w = w - 8, h = 1, res = res}
+          -- Опис
+          gpu.setForeground(0x808080)
+          if cy + 1 < y + 3 + contentH then
+            gpu.set(cx + 8, cy + 1, res.desc)
+          end
+          
+          -- Зберігаємо для кліку
+          win["res_" .. i] = {x = cx + 2, y = cy, w = cw - 4, h = 2, res = res}
         end
+        
+        cy = cy + 3
       end
     end
     
-    -- Інструкція
-    gpu.setBackground(0xFFFFFF)
-    gpu.setForeground(0x808080)
-    gpu.set(x + 2, y + h - 2, "Click resolution to apply")
+    if cy >= y + 3 and cy < y + 3 + contentH then
+      gpu.setForeground(0x606060)
+      gpu.set(cx, cy, "Click to apply and restart")
+    end
+    
+    win.maxScrollY = math.max(0, cy - (y + 3 + contentH) + 5)
   
   -- ============ ВКЛАДКА UPDATE ============
   elseif win.selectedTab == 3 then
     gpu.setForeground(0x000080)
-    gpu.set(x + 2, y + 5, "╔══════════════════════════════╗")
-    gpu.set(x + 2, y + 6, "║  System Update               ║")
-    gpu.set(x + 2, y + 7, "╚══════════════════════════════╝")
+    if cy >= y + 3 and cy < y + 3 + contentH then
+      gpu.set(cx, cy, "System Update")
+    end
+    cy = cy + 2
     
-    gpu.setForeground(0x000000)
-    gpu.set(x + 2, y + 9, "Current Version: " .. win.version)
-    gpu.set(x + 2, y + 10, "Update Server: GitHub")
+    -- Інфо про версію
+    if cy + 3 >= y + 3 then
+      drawGroup(gpu, cx, cy, cw, 4, "Version Information")
+    end
+    cy = cy + 1
+    
+    if cy >= y + 3 and cy < y + 3 + contentH then
+      gpu.setForeground(0x000000)
+      gpu.set(cx + 2, cy, "Installed: " .. win.version)
+    end
+    cy = cy + 1
+    
+    if cy >= y + 3 and cy < y + 3 + contentH then
+      gpu.setForeground(0x606060)
+      gpu.set(cx + 2, cy, "Source: GitHub/FixlutGames21")
+    end
+    cy = cy + 3
     
     -- Статус оновлення
-    gpu.setForeground(0x000080)
-    gpu.set(x + 2, y + 12, "═══ Update Status ═══")
+    if cy + 5 >= y + 3 then
+      drawGroup(gpu, cx, cy, cw, 6, "Update Status")
+    end
+    cy = cy + 1
     
-    gpu.setForeground(0x000000)
-    gpu.set(x + 2, y + 13, "Status: " .. win.updateStatus)
-    
-    -- Прогрес бар оновлення
-    if win.updateProgress > 0 then
-      local barW = w - 8
-      local filled = math.floor(barW * win.updateProgress)
-      
-      gpu.set(x + 3, y + 15, "╔")
-      gpu.setForeground(0x00AA00)
-      for i = 1, filled do
-        gpu.set(x + 3 + i, y + 15, "█")
-      end
-      gpu.setForeground(0xCCCCCC)
-      for i = filled + 1, barW do
-        gpu.set(x + 3 + i, y + 15, "░")
-      end
+    if cy >= y + 3 and cy < y + 3 + contentH then
       gpu.setForeground(0x000000)
-      gpu.set(x + 4 + barW, y + 15, "╗")
-      gpu.set(x + 3, y + 16, string.format("%.0f%% complete", win.updateProgress * 100))
+      gpu.set(cx + 2, cy, "Status: " .. win.updateStatus)
+    end
+    cy = cy + 2
+    
+    -- Прогрес
+    if win.updateProgress > 0 then
+      if cy >= y + 3 and cy < y + 3 + contentH then
+        drawProgressBar(gpu, cx + 2, cy, cw - 4, win.updateProgress, 0x00AA00)
+      end
+      cy = cy + 1
+      
+      if cy >= y + 3 and cy < y + 3 + contentH then
+        gpu.setForeground(0x606060)
+        gpu.set(cx + 2, cy, string.format("%.0f%% complete", win.updateProgress * 100))
+      end
+    end
+    cy = cy + 3
+    
+    -- Кнопка оновлення
+    if cy >= y + 3 and cy < y + 3 + contentH then
+      local enabled = component.isAvailable("internet")
+      drawButton(gpu, cx + 2, cy, 20, "Check for Updates", enabled, false)
+      win.updateButton = {x = cx + 2, y = cy, w = 20, h = 3}
+    end
+    cy = cy + 4
+    
+    if cy >= y + 3 and cy < y + 3 + contentH then
+      gpu.setForeground(0x808080)
+      gpu.set(cx, cy, component.isAvailable("internet") and 
+        "Internet Card detected" or "⚠ Internet Card required")
     end
     
-    -- Кнопка перевірки оновлень
-    local btnY = y + h - 5
-    gpu.setBackground(0x00AA00)
-    gpu.setForeground(0xFFFFFF)
-    gpu.fill(x + 4, btnY, 20, 3, " ")
-    
-    -- 3D ефект кнопки
-    gpu.setForeground(0xFFFFFF)
-    for i = 0, 19 do gpu.set(x + 4 + i, btnY, "▀") end
-    for i = 0, 2 do gpu.set(x + 4, btnY + i, "▌") end
-    
-    gpu.setForeground(0x404040)
-    for i = 0, 19 do gpu.set(x + 4 + i, btnY + 2, "▄") end
-    for i = 0, 2 do gpu.set(x + 23, btnY + i, "▐") end
-    
-    gpu.setForeground(0xFFFFFF)
-    gpu.setBackground(0x00AA00)
-    gpu.set(x + 8, btnY + 1, "⟳ Check Updates")
-    
-    win.updateButton = {x = x + 4, y = btnY, w = 20, h = 3}
-    
-    -- Інструкція
-    gpu.setBackground(0xFFFFFF)
-    gpu.setForeground(0x808080)
-    gpu.set(x + 2, y + h - 2, "Requires Internet Card")
+    win.maxScrollY = math.max(0, cy - (y + 3 + contentH) + 5)
   
   -- ============ ВКЛАДКА ABOUT ============
   elseif win.selectedTab == 4 then
-    gpu.setForeground(0x000080)
-    gpu.set(x + 2, y + 5, "╔══════════════════════════════╗")
-    gpu.set(x + 2, y + 6, "║         FixOS 2.0            ║")
-    gpu.set(x + 2, y + 7, "╚══════════════════════════════╝")
+    -- Логотип
+    if cy >= y + 3 and cy < y + 3 + contentH then
+      gpu.setForeground(0x0000AA)
+      gpu.set(cx + math.floor(cw/2) - 5, cy, "╔═══════╗")
+    end
+    cy = cy + 1
     
-    gpu.setForeground(0x000000)
-    gpu.set(x + 2, y + 9, "A Windows 2000 style OS")
-    gpu.set(x + 2, y + 10, "for OpenComputers")
+    if cy >= y + 3 and cy < y + 3 + contentH then
+      gpu.set(cx + math.floor(cw/2) - 5, cy, "║ FixOS ║")
+    end
+    cy = cy + 1
     
-    gpu.set(x + 2, y + 12, "© 2024 FixlutGames21")
-    gpu.set(x + 2, y + 13, "Licensed under MIT")
+    if cy >= y + 3 and cy < y + 3 + contentH then
+      gpu.set(cx + math.floor(cw/2) - 5, cy, "╚═══════╝")
+    end
+    cy = cy + 2
     
-    gpu.setForeground(0x000080)
-    gpu.set(x + 2, y + 15, "═══ Features ═══")
+    -- Версія
+    if cy >= y + 3 and cy < y + 3 + contentH then
+      gpu.setForeground(0x000000)
+      local verText = "Version " .. win.version
+      gpu.set(cx + math.floor(cw/2) - math.floor(#verText/2), cy, verText)
+    end
+    cy = cy + 2
     
-    gpu.setForeground(0x000000)
-    gpu.set(x + 3, y + 16, "✓ Windowed interface")
-    gpu.set(x + 3, y + 17, "✓ Modular programs")
-    gpu.set(x + 3, y + 18, "✓ Multiple applications")
-    gpu.set(x + 3, y + 19, "✓ Easy to customize")
-    gpu.set(x + 3, y + 20, "✓ Fast & optimized")
+    -- Опис
+    if cy >= y + 3 and cy < y + 3 + contentH then
+      gpu.setForeground(0x606060)
+      local desc = "Windows 2000 style OS"
+      gpu.set(cx + math.floor(cw/2) - math.floor(#desc/2), cy, desc)
+    end
+    cy = cy + 1
     
-    gpu.setForeground(0x808080)
-    gpu.set(x + 2, y + h - 2, "Version: " .. win.version)
+    if cy >= y + 3 and cy < y + 3 + contentH then
+      local desc2 = "for OpenComputers"
+      gpu.set(cx + math.floor(cw/2) - math.floor(#desc2/2), cy, desc2)
+    end
+    cy = cy + 3
+    
+    -- Автор
+    if cy + 3 >= y + 3 then
+      drawGroup(gpu, cx, cy, cw, 4, "Credits")
+    end
+    cy = cy + 1
+    
+    if cy >= y + 3 and cy < y + 3 + contentH then
+      gpu.setForeground(0x000000)
+      gpu.set(cx + 2, cy, "© 2024 FixlutGames21")
+    end
+    cy = cy + 1
+    
+    if cy >= y + 3 and cy < y + 3 + contentH then
+      gpu.setForeground(0x606060)
+      gpu.set(cx + 2, cy, "Licensed under MIT")
+    end
+    cy = cy + 3
+    
+    -- Features
+    if cy + 7 >= y + 3 then
+      drawGroup(gpu, cx, cy, cw, 8, "Features")
+    end
+    cy = cy + 1
+    
+    local features = {
+      "✓ Windowed interface",
+      "✓ Multiple programs",
+      "✓ Easy customization",
+      "✓ Fast rendering",
+      "✓ Modular design",
+      "✓ Windows 2000 style"
+    }
+    
+    for _, feature in ipairs(features) do
+      if cy >= y + 3 and cy < y + 3 + contentH then
+        gpu.setForeground(0x00AA00)
+        gpu.set(cx + 2, cy, feature)
+      end
+      cy = cy + 1
+    end
+    
+    win.maxScrollY = math.max(0, cy - (y + 3 + contentH) + 5)
   end
 end
 
 function settings.click(win, x, y, button)
+  local contentH = 17  -- Має відповідати draw
+  local contentW = 56
+  local cx = 2
+  local scrollbarX = 58
+  
   -- Клік по вкладках
   local tabX = 0
   for i, tab in ipairs(win.tabs) do
     if x >= tabX and x < tabX + 13 and y >= 0 and y < 3 then
       win.selectedTab = i
+      win.scrollY = 0  -- Скидаємо scroll при зміні вкладки
       return true
     end
     tabX = tabX + 14
   end
+  
+  -- Клік по scrollbar
+  if x >= scrollbarX and x < scrollbarX + 1 and y >= 3 and y < 3 + contentH then
+    if y == 3 then
+      -- Кнопка вгору
+      win.scrollY = math.max(0, win.scrollY - 1)
+      return true
+    elseif y == 3 + contentH - 1 then
+      -- Кнопка вниз
+      win.scrollY = math.min(win.maxScrollY, win.scrollY + 1)
+      return true
+    else
+      -- Клік по треку
+      local relY = y - 3
+      local pct = relY / contentH
+      win.scrollY = math.floor(win.maxScrollY * pct)
+      return true
+    end
+  end
+  
+  -- Враховуємо scroll для кліків по контенту
+  local adjustedY = y + win.scrollY
   
   -- Клік по роздільності (вкладка Display)
   if win.selectedTab == 2 then
     for i, res in ipairs(win.resolutions) do
       local btn = win["res_" .. i]
       if btn and x >= btn.x and x < btn.x + btn.w and 
-         y >= btn.y and y < btn.y + btn.h then
+         adjustedY >= btn.y and adjustedY < btn.y + btn.h then
         -- Застосовуємо роздільність
         local gpu = component.proxy(component.list("gpu")())
         gpu.setResolution(btn.res.w, btn.res.h)
@@ -300,7 +606,7 @@ function settings.click(win, x, y, button)
           fs.close(handle)
         end
         
-        -- Перезавантаження системи для застосування
+        -- Перезавантаження системи
         computer.shutdown(true)
         return true
       end
@@ -311,14 +617,25 @@ function settings.click(win, x, y, button)
   if win.selectedTab == 3 and win.updateButton then
     local btn = win.updateButton
     if x >= btn.x and x < btn.x + btn.w and 
-       y >= btn.y and y < btn.y + btn.h then
-      -- Запускаємо перевірку оновлень
+       adjustedY >= btn.y and adjustedY < btn.y + btn.h then
       settings.checkUpdates(win)
       return true
     end
   end
   
   return false
+end
+
+-- Підтримка коліщатка миші (якщо є)
+function settings.scroll(win, direction)
+  if direction > 0 then
+    -- Scroll вниз
+    win.scrollY = math.min(win.maxScrollY, win.scrollY + 3)
+  else
+    -- Scroll вгору
+    win.scrollY = math.max(0, win.scrollY - 3)
+  end
+  return true
 end
 
 function settings.checkUpdates(win)
@@ -330,7 +647,6 @@ function settings.checkUpdates(win)
   win.updateStatus = "Checking..."
   win.updateProgress = 0.1
   
-  -- Симуляція перевірки оновлень
   local internet = component.internet
   local url = "https://raw.githubusercontent.com/FixlutGames21/FixOS/main/version.txt"
   
@@ -366,9 +682,9 @@ function settings.checkUpdates(win)
     if remoteVer then
       win.updateProgress = 1.0
       if remoteVer == win.version then
-        win.updateStatus = "Up to date!"
+        win.updateStatus = "✓ Up to date!"
       else
-        win.updateStatus = "Update available: v" .. remoteVer
+        win.updateStatus = "⬇ Update available: v" .. remoteVer
       end
     else
       win.updateStatus = "Error: Invalid response"
