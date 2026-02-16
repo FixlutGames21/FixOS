@@ -1,6 +1,5 @@
 -- ==============================================
--- FixOS 3.0 - Notepad
--- system/programs/notepad.lua
+-- FixOS 3.1.0 - Notepad (WINDOWS 10 STYLE)
 -- ==============================================
 
 local notepad = {}
@@ -15,28 +14,31 @@ function notepad.init(win)
 end
 
 function notepad.draw(win, gpu, x, y, w, h)
+  -- White background (clean Windows 10 style)
   gpu.setBackground(0xFFFFFF)
   gpu.setForeground(0x000000)
   gpu.fill(x, y, w, h, " ")
   
-  gpu.setBackground(0xC0C0C0)
+  -- Status bar (flat, at bottom)
+  gpu.setBackground(0xF0F0F0)
   gpu.fill(x, y + h - 1, w, 1, " ")
   
   local filename = win.filename
   if #filename > w - 20 then
     filename = "..." .. filename:sub(-(w - 23))
   end
-  gpu.set(x + 1, y + h - 1, "File: " .. filename)
+  gpu.setForeground(0x666666)
+  gpu.set(x + 1, y + h - 1, filename)
   
-  local statusText = string.format("Ln %d Col %d", win.cursorLine, win.cursorCol)
-  if #statusText <= 15 then
-    gpu.set(x + w - 15, y + h - 1, statusText)
-  end
+  local statusText = string.format("Ln %d, Col %d", win.cursorLine, win.cursorCol)
+  gpu.set(x + w - #statusText - 1, y + h - 1, statusText)
   
   if win.modified then
-    gpu.set(x + w - 17, y + h - 1, "*")
+    gpu.setForeground(0x0078D7)
+    gpu.set(x + w - #statusText - 3, y + h - 1, "●")
   end
   
+  -- Text area
   gpu.setBackground(0xFFFFFF)
   gpu.setForeground(0x000000)
   
@@ -56,22 +58,23 @@ function notepad.draw(win, gpu, x, y, w, h)
     end
   end
   
+  -- Cursor (flat line)
   local cursorScreenY = win.cursorLine - win.scrollY
   
   if cursorScreenY >= 1 and cursorScreenY <= visibleLines then
     local cy = y + cursorScreenY - 1
     local cx = x + math.min(win.cursorCol - 1, w - 1)
     
-    gpu.setForeground(0x000000)
+    gpu.setForeground(0x0078D7)
     gpu.setBackground(0xFFFFFF)
-    gpu.set(cx, cy, "_")
+    gpu.set(cx, cy, "│")
   end
 end
 
 function notepad.key(win, char, code)
   local changed = false
   
-  if code == 28 then 
+  if code == 28 then
     local currentLine = win.lines[win.cursorLine]
     local leftPart = currentLine:sub(1, win.cursorCol - 1)
     local rightPart = currentLine:sub(win.cursorCol)
@@ -84,7 +87,7 @@ function notepad.key(win, char, code)
     
     changed = true
     
-  elseif code == 14 then 
+  elseif code == 14 then
     if win.cursorCol > 1 then
       local line = win.lines[win.cursorLine]
       win.lines[win.cursorLine] = line:sub(1, win.cursorCol - 2) .. line:sub(win.cursorCol)

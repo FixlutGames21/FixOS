@@ -1,6 +1,5 @@
 -- ==============================================
--- FixOS 3.0 - My Computer
--- system/programs/mycomputer.lua
+-- FixOS 3.1.0 - My Computer (WIN10 STYLE)
 -- ==============================================
 
 local mycomp = {}
@@ -15,11 +14,9 @@ function mycomp.init(win)
     if proxy then
       local drive = {
         address = addr:sub(1, 8),
-        fullAddress = addr,
         label = "Unknown",
         total = 0,
         free = 0,
-        readOnly = false,
         isBootDrive = (addr == bootAddr)
       }
       
@@ -33,18 +30,12 @@ function mycomp.init(win)
       local ok, total = pcall(function() return proxy.spaceTotal() end)
       if ok and total then
         drive.total = total
-        
         local ok2, used = pcall(function() return proxy.spaceUsed() end)
         if ok2 and used then
           drive.free = total - used
         else
           drive.free = total
         end
-      end
-      
-      local ok, ro = pcall(function() return proxy.isReadOnly() end)
-      if ok then
-        drive.readOnly = ro
       end
       
       if drive.total > 10000 then
@@ -54,41 +45,43 @@ function mycomp.init(win)
   end
   
   table.sort(win.drives, function(a, b)
-    if a.isBootDrive ~= b.isBootDrive then
-      return a.isBootDrive
-    end
+    if a.isBootDrive ~= b.isBootDrive then return a.isBootDrive end
     return a.total > b.total
   end)
 end
 
 function mycomp.draw(win, gpu, x, y, w, h)
   gpu.setBackground(0xFFFFFF)
-  gpu.setForeground(0x000000)
   gpu.fill(x, y, w, h, " ")
   
-  gpu.setForeground(0x000080)
-  gpu.set(x + 2, y + 1, "Computer Drives:")
+  -- Header (flat)
+  gpu.setBackground(0xF0F0F0)
+  gpu.setForeground(0x0078D7)
+  gpu.fill(x, y, w, 1, " ")
+  gpu.set(x + 2, y, "💻 This PC")
   
-  local yPos = y + 3
+  gpu.setBackground(0xFFFFFF)
+  
+  local yPos = y + 2
   
   for i, drive in ipairs(win.drives) do
-    if yPos + 4 < y + h then
-      local icon = drive.isBootDrive and "[SYS]" or "[HDD]"
-      local nameColor = drive.isBootDrive and 0x0000FF or 0x000000
+    if yPos + 5 < y + h then
+      -- Drive card (flat)
+      local cardColor = drive.isBootDrive and 0xE8F5E9 or 0xF5F5F5
+      gpu.setBackground(cardColor)
+      gpu.fill(x + 2, yPos, w - 4, 5, " ")
       
-      gpu.setForeground(nameColor)
-      gpu.set(x + 2, yPos, icon .. " " .. drive.label)
+      -- Drive icon and name
+      local icon = drive.isBootDrive and "💾" or "📀"
+      gpu.setForeground(0x0078D7)
+      gpu.set(x + 3, yPos, icon .. " " .. drive.label)
       
       if drive.isBootDrive then
-        gpu.setForeground(0x00AA00)
-        gpu.set(x + w - 7, yPos, "(BOOT)")
+        gpu.setForeground(0x10893E)
+        gpu.set(x + w - 9, yPos, "(BOOT)")
       end
       
-      if drive.readOnly then
-        gpu.setForeground(0xFF0000)
-        gpu.set(x + w - 5, yPos, "(RO)")
-      end
-      
+      -- Size info
       local function formatSize(bytes)
         if bytes > 1024 * 1024 then
           return string.format("%.1fMB", bytes / (1024 * 1024))
@@ -99,55 +92,40 @@ function mycomp.draw(win, gpu, x, y, w, h)
         end
       end
       
-      local totalText = formatSize(drive.total)
-      local freeText = formatSize(drive.free)
-      
-      gpu.setForeground(0x808080)
+      gpu.setForeground(0x666666)
       gpu.set(x + 4, yPos + 1, "Address: " .. drive.address)
-      gpu.set(x + 4, yPos + 2, "Total: " .. totalText .. " | Free: " .. freeText)
+      gpu.set(x + 4, yPos + 2, "Total: " .. formatSize(drive.total))
+      gpu.set(x + 4, yPos + 3, "Free: " .. formatSize(drive.free))
       
+      -- Progress bar (flat)
       if drive.total > 0 then
         local used = drive.total - drive.free
         local usedPct = used / drive.total
-        local barWidth = math.min(w - 8, 30)
+        local barWidth = w - 10
         local filledWidth = math.floor(barWidth * usedPct)
         
-        gpu.setForeground(0x000000)
-        gpu.set(x + 4, yPos + 3, "[")
+        gpu.setBackground(0xE0E0E0)
+        gpu.fill(x + 4, yPos + 4, barWidth, 1, " ")
         
-        local barColor
-        if usedPct < 0.7 then
-          barColor = 0x00AA00
-        elseif usedPct < 0.9 then
-          barColor = 0xFFAA00
-        else
-          barColor = 0xFF0000
-        end
-        
-        gpu.setForeground(barColor)
-        for k = 1, filledWidth do
-          gpu.set(x + 4 + k, yPos + 3, "■")
-        end
-        
-        gpu.setForeground(0xCCCCCC)
-        for k = filledWidth + 1, barWidth do
-          gpu.set(x + 4 + k, yPos + 3, "□")
-        end
+        local barColor = usedPct < 0.7 and 0x10893E or (usedPct < 0.9 and 0xFFB900 or 0xE81123)
+        gpu.setBackground(barColor)
+        gpu.fill(x + 4, yPos + 4, filledWidth, 1, " ")
         
         gpu.setForeground(0x000000)
-        gpu.set(x + 5 + barWidth, yPos + 3, "]")
-        
-        local pctText = string.format(" %.0f%%", usedPct * 100)
-        gpu.set(x + 7 + barWidth, yPos + 3, pctText)
+        gpu.setBackground(0xE0E0E0)
+        local pctText = string.format("%.0f%%", usedPct * 100)
+        gpu.set(x + 4 + math.floor((barWidth - #pctText) / 2), yPos + 4, pctText)
       end
       
-      yPos = yPos + 5
+      yPos = yPos + 6
     end
   end
   
+  -- Summary
+  gpu.setBackground(0xFFFFFF)
   if yPos < y + h - 1 then
-    gpu.setForeground(0x808080)
-    gpu.set(x + 2, y + h - 2, string.format("Total drives: %d", #win.drives))
+    gpu.setForeground(0x666666)
+    gpu.set(x + 2, y + h - 1, string.format("Total drives: %d", #win.drives))
   end
 end
 

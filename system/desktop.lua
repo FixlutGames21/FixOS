@@ -1,6 +1,7 @@
 -- ==============================================
--- FixOS 3.0 - desktop.lua (ПОВНІСТЮ ПЕРЕПИСАНО)
--- Нова архітектура + splash + іконки
+-- FixOS 3.1.1 - desktop.lua (ULTRA WINDOWS 10)
+-- Максимальна схожість з Windows 10
+-- Acrylic blur, Fluent Design, Reveal effects
 -- ==============================================
 
 if not component.isAvailable("gpu") then
@@ -17,20 +18,20 @@ end
 gpu.bind(screen)
 
 -- ====================
--- SPLASH SCREEN
+-- WINDOWS 10 LOADING WITH RING
 -- ====================
 
-local function showSplash()
+local function showWindows10Boot()
   local maxW, maxH = gpu.maxResolution()
   local w = math.min(80, maxW)
   local h = math.min(25, maxH)
   gpu.setResolution(w, h)
   
-  gpu.setBackground(0x0000AA)
+  -- Windows 10 pure blue
+  gpu.setBackground(0x0078D7)
   gpu.fill(1, 1, w, h, " ")
   
-  -- Логотип
-  gpu.setForeground(0xFFFFFF)
+  -- FixOS Logo
   local logo = {
     "███████╗██╗██╗  ██╗ ██████╗ ███████╗",
     "██╔════╝██║╚██╗██╔╝██╔═══██╗██╔════╝",
@@ -40,38 +41,38 @@ local function showSplash()
     "╚═╝     ╚═╝╚═╝  ╚═╝ ╚═════╝ ╚══════╝"
   }
   
-  local startY = math.floor(h / 2) - 5
+  gpu.setForeground(0xFFFFFF)
+  local logoY = math.floor(h / 2) - 5
   for i, line in ipairs(logo) do
     local x = math.floor((w - #line) / 2)
-    gpu.set(x, startY + i - 1, line)
+    gpu.set(x, logoY + i - 1, line)
   end
   
-  -- Версія
-  gpu.setForeground(0xFFFF00)
-  local version = "Version 3.0.0 - SUPER EDITION"
-  gpu.set(math.floor((w - #version) / 2), startY + 8, version)
+  -- Edition text
+  gpu.setForeground(0xE3F2FD)
+  local edition = "MAXIMUM WINDOWS 10 EDITION"
+  gpu.set(math.floor((w - #edition) / 2), logoY + 8, edition)
   
-  -- Loading bar
-  gpu.setForeground(0x00FF00)
-  local barW = 40
-  local barX = math.floor((w - barW) / 2)
-  local barY = startY + 10
+  -- Windows 10 ring loader (5 dots spinning)
+  local ringY = logoY + 11
+  local ringX = math.floor(w / 2)
+  local dots = {"⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"}
   
-  gpu.set(barX, barY, "[" .. string.rep(" ", barW - 2) .. "]")
-  
-  for i = 1, barW - 2 do
-    gpu.set(barX + i, barY, "█")
-    computer.beep(200 + i * 10, 0.02)
-    os.sleep(0.015)
+  for frame = 1, 25 do
+    local char = dots[(frame % #dots) + 1]
+    gpu.setForeground(0xFFFFFF)
+    gpu.set(ringX, ringY, char .. " " .. char)
+    computer.beep(150 + frame * 15, 0.01)
+    os.sleep(0.04)
   end
   
-  os.sleep(0.3)
+  os.sleep(0.2)
 end
 
-showSplash()
+showWindows10Boot()
 
 -- ====================
--- НАЛАШТУВАННЯ ЕКРАНУ
+-- RESOLUTION SETUP
 -- ====================
 
 local function loadResolution()
@@ -104,60 +105,193 @@ end
 local w, h = gpu.getResolution()
 
 -- ====================
--- ЗАВАНТАЖЕННЯ МОДУЛІВ
--- ====================
-
-local icons = dofile("/system/icons.lua")
-
--- ====================
--- КОЛЬОРИ (ПОКРАЩЕНІ)
+-- FLUENT DESIGN COLORS
 -- ====================
 
 local COLORS = {
-  desktop = 0x008888,
-  taskbar = 0xD3D3D3,
-  taskbarDark = 0xA0A0A0,
-  startBtn = 0x00CC00,
-  startBtnHover = 0x00FF00,
-  startBtnText = 0xFFFFFF,
-  iconBg = 0x008888,
-  iconText = 0xFFFFFF,
-  iconSelected = 0x0066CC,
-  iconHighlight = 0x00AAFF,
-  windowTitle = 0x0000AA,
-  windowTitleInactive = 0x808080,
-  windowBg = 0xD3D3D3,
-  white = 0xFFFFFF,
-  black = 0x000000,
-  btnHighlight = 0xFFFFFF,
-  btnShadow = 0x606060,
-  error = 0xFF0000,
-  success = 0x00AA00
+  -- Windows 10 Fluent Design System
+  accentPrimary = 0x0078D7,        -- Primary blue
+  accentSecondary = 0x005A9E,      -- Dark blue
+  accentLight = 0x429CE3,          -- Light blue
+  accentLightest = 0xE3F2FD,       -- Very light blue
+  
+  -- Acrylic backgrounds (simulated transparency)
+  acrylicDark = 0x1F1F1F,          -- Dark acrylic
+  acrylicLight = 0xF3F3F3,         -- Light acrylic
+  
+  -- Base colors
+  chromeDark = 0x2D2D30,           -- Chrome dark
+  chromeLight = 0xF0F0F0,          -- Chrome light
+  
+  -- Desktop
+  desktop = 0x0078D7,              -- Solid blue desktop
+  
+  -- UI elements
+  surface = 0xFFFFFF,              -- White surface
+  surfaceVariant = 0xF9F9F9,       -- Light gray
+  
+  -- Text
+  textPrimary = 0x000000,          -- Black
+  textSecondary = 0x666666,        -- Gray
+  textTertiary = 0x999999,         -- Light gray
+  textOnAccent = 0xFFFFFF,         -- White
+  
+  -- Borders & dividers
+  divider = 0xE5E5E5,              -- Divider
+  border = 0xCCCCCC,               -- Border
+  
+  -- Shadows
+  shadow1 = 0xE0E0E0,              -- Light shadow
+  shadow2 = 0xB0B0B0,              -- Medium shadow
+  shadow3 = 0x808080,              -- Dark shadow
+  
+  -- Status colors
+  success = 0x10893E,              -- Green
+  error = 0xE81123,                -- Red
+  warning = 0xFFB900,              -- Orange
+  info = 0x0078D7,                 -- Blue
+  
+  -- Hover states
+  hoverLight = 0xF5F5F5,           -- Light hover
+  hoverDark = 0x3E3E42,            -- Dark hover
+  
+  -- Special
+  transparent = 0x000000           -- For transparency simulation
 }
 
 -- ====================
--- УТИЛІТИ
+-- DRAWING UTILITIES
+-- ====================
+
+local function drawAcrylicRect(x, y, w, h, color, alpha)
+  -- Simulated acrylic effect with dithering
+  gpu.setBackground(color)
+  gpu.fill(x, y, w, h, " ")
+  
+  -- Add subtle pattern for acrylic feel
+  if alpha then
+    gpu.setBackground(color)
+    for i = 0, h - 1 do
+      if i % 2 == 0 then
+        for j = 0, w - 1, 2 do
+          gpu.setBackground(alpha)
+          gpu.set(x + j, y + i, " ")
+        end
+      end
+    end
+  end
+end
+
+local function drawShadow(x, y, w, h, intensity)
+  -- Multi-layer shadow for depth
+  intensity = intensity or 3
+  
+  for i = 1, intensity do
+    local shadowColor = COLORS.shadow1
+    if i == 2 then shadowColor = COLORS.shadow2
+    elseif i >= 3 then shadowColor = COLORS.shadow3 end
+    
+    gpu.setBackground(shadowColor)
+    gpu.fill(x + i, y + i, w, 1, "▀")
+    gpu.fill(x + w + i, y, 1, h + i, "▐")
+  end
+end
+
+local function drawModernButton(x, y, w, h, label, state, color)
+  -- state: "normal", "hover", "pressed"
+  state = state or "normal"
+  color = color or COLORS.accentPrimary
+  
+  local bg = color
+  if state == "hover" then
+    bg = COLORS.accentLight
+  elseif state == "pressed" then
+    bg = COLORS.accentSecondary
+  end
+  
+  -- Shadow for elevation
+  if state ~= "pressed" then
+    drawShadow(x, y, w, h, 1)
+  end
+  
+  -- Button surface
+  gpu.setBackground(bg)
+  gpu.fill(x, y, w, h, " ")
+  
+  -- Button text (centered)
+  gpu.setForeground(COLORS.textOnAccent)
+  local textX = x + math.floor((w - #label) / 2)
+  local textY = y + math.floor(h / 2)
+  gpu.set(textX, textY, label)
+  
+  -- Subtle border for definition
+  gpu.setForeground(COLORS.accentSecondary)
+  if state ~= "pressed" then
+    gpu.set(x, y, "┌")
+    gpu.set(x + w - 1, y, "┐")
+    gpu.set(x, y + h - 1, "└")
+    gpu.set(x + w - 1, y + h - 1, "┘")
+  end
+end
+
+local function drawCard(x, y, w, h, title, elevated)
+  elevated = elevated == nil and true or elevated
+  
+  -- Shadow for elevation
+  if elevated then
+    drawShadow(x, y, w, h, 2)
+  end
+  
+  -- Card surface
+  gpu.setBackground(COLORS.surface)
+  gpu.fill(x, y, w, h, " ")
+  
+  -- Title bar if provided
+  if title then
+    gpu.setBackground(COLORS.surfaceVariant)
+    gpu.fill(x, y, w, 1, " ")
+    
+    gpu.setForeground(COLORS.textPrimary)
+    gpu.set(x + 2, y, title)
+  end
+  
+  -- Subtle border
+  gpu.setForeground(COLORS.divider)
+  for i = 0, w - 1 do
+    gpu.set(x + i, y, "─")
+    gpu.set(x + i, y + h - 1, "─")
+  end
+  for i = 0, h - 1 do
+    gpu.set(x, y + i, "│")
+    gpu.set(x + w - 1, y + i, "│")
+  end
+  
+  -- Corners
+  gpu.set(x, y, "┌")
+  gpu.set(x + w - 1, y, "┐")
+  gpu.set(x, y + h - 1, "└")
+  gpu.set(x + w - 1, y + h - 1, "┘")
+end
+
+-- ====================
+-- UTILITIES
 -- ====================
 
 local function loadProgram(name)
   local path = "/system/programs/" .. name .. ".lua"
   local fs = component.proxy(computer.getBootAddress())
   if not fs.exists(path) then
-    return nil, "Program not found: " .. name
+    return nil, "Program not found"
   end
   
   local func, err = loadfile(path)
   if not func then
-    return nil, "Load error: " .. tostring(err)
+    return nil, tostring(err)
   end
   
   local ok, module = pcall(func)
   if not ok then
-    return nil, "Init error: " .. tostring(module)
-  end
-  
-  if type(module) ~= "table" then
-    return nil, "Program must return table"
+    return nil, tostring(module)
   end
   
   return module
@@ -185,54 +319,61 @@ local function truncate(text, maxLen)
 end
 
 -- ====================
--- ІКОНКИ РОБОЧОГО СТОЛУ
+-- MODERN ICONS (TILES)
 -- ====================
 
 local DESKTOP_ICONS = {
   {
-    x = 2, y = 2, w = 14, h = 7,
-    label = "My Computer",
-    icon = "computer",
+    x = 3, y = 2, w = 13, h = 6,
+    label = "Computer",
+    color = COLORS.accentPrimary,
+    icon = "💻",
     program = "mycomputer"
   },
   {
-    x = 2, y = 10, w = 14, h = 7,
+    x = 3, y = 9, w = 13, h = 6,
     label = "Explorer",
-    icon = "folder",
+    color = COLORS.warning,
+    icon = "📁",
     program = "explorer"
   },
   {
-    x = 2, y = 18, w = 14, h = 7,
+    x = 3, y = 16, w = 13, h = 6,
     label = "Terminal",
-    icon = "terminal",
+    color = 0x212121,
+    icon = "⌘",
     program = "terminal"
   },
   {
-    x = 18, y = 2, w = 14, h = 7,
+    x = 18, y = 2, w = 13, h = 6,
     label = "Calculator",
-    icon = "calculator",
+    color = 0x00838F,
+    icon = "🔢",
     program = "calculator"
   },
   {
-    x = 18, y = 10, w = 14, h = 7,
+    x = 18, y = 9, w = 13, h = 6,
     label = "Notepad",
-    icon = "notepad",
+    color = 0x1565C0,
+    icon = "📝",
     program = "notepad"
   },
   {
-    x = 18, y = 18, w = 14, h = 7,
+    x = 18, y = 16, w = 13, h = 6,
     label = "Settings",
-    icon = "settings",
+    color = COLORS.chromeDark,
+    icon = "⚙",
     program = "settings"
   }
 }
 
 -- ====================
--- СТАН СИСТЕМИ
+-- STATE
 -- ====================
 
 local state = {
   selectedIcon = nil,
+  hoverIcon = nil,
   startMenuOpen = false,
   activeWindows = {},
   focusedWindow = nil,
@@ -240,168 +381,173 @@ local state = {
   dragOffsetX = 0,
   dragOffsetY = 0,
   clockTimer = 0,
-  running = true
+  running = true,
+  hoverButton = nil
 }
 
 -- ====================
--- ФУНКЦІЇ МАЛЮВАННЯ
+-- DRAWING FUNCTIONS
 -- ====================
 
-local function draw3DFrame(x, y, w, h, raised)
-  local topLeft = raised and COLORS.btnHighlight or COLORS.btnShadow
-  local bottomRight = raised and COLORS.btnShadow or COLORS.btnHighlight
+local function drawModernIcon(icon, selected, hover)
+  local bg = icon.color
   
-  gpu.setForeground(topLeft)
-  for i = 0, w - 1 do gpu.set(x + i, y, "▀") end
-  for i = 0, h - 1 do gpu.set(x, y + i, "▌") end
-  
-  gpu.setForeground(bottomRight)
-  for i = 0, w - 1 do gpu.set(x + i, y + h - 1, "▄") end
-  for i = 0, h - 1 do gpu.set(x + w - 1, y + i, "▐") end
-end
-
-local function drawIcon(iconData, selected)
-  local bg = selected and COLORS.iconSelected or COLORS.iconBg
-  
-  gpu.setBackground(bg)
-  gpu.fill(iconData.x, iconData.y, iconData.w, iconData.h, " ")
-  
-  -- Рамка при виборі
-  if selected then
-    gpu.setForeground(COLORS.iconHighlight)
-    gpu.set(iconData.x, iconData.y, "┌" .. string.rep("─", iconData.w - 2) .. "┐")
-    gpu.set(iconData.x, iconData.y + iconData.h - 1, "└" .. string.rep("─", iconData.w - 2) .. "┘")
-    for i = 1, iconData.h - 2 do
-      gpu.set(iconData.x, iconData.y + i, "│")
-      gpu.set(iconData.x + iconData.w - 1, iconData.y + i, "│")
-    end
+  -- Hover effect (lighter)
+  if hover and not selected then
+    -- Lighten color for hover
+    local r = math.floor(bg / 65536)
+    local g = math.floor((bg % 65536) / 256)
+    local b = bg % 256
+    
+    r = math.min(255, r + 30)
+    g = math.min(255, g + 30)
+    b = math.min(255, b + 30)
+    
+    bg = r * 65536 + g * 256 + b
   end
   
-  -- Іконка
-  local iconX = iconData.x + math.floor((iconData.w - 8) / 2)
-  local iconY = iconData.y + 1
-  icons.draw(gpu, iconData.icon, iconX, iconY, 8, 4, COLORS.iconText)
+  -- Selection border
+  if selected then
+    gpu.setBackground(COLORS.accentLightest)
+    gpu.fill(icon.x - 1, icon.y - 1, icon.w + 2, icon.h + 2, " ")
+  end
   
-  -- Текст
-  gpu.setForeground(COLORS.white)
+  -- Shadow
+  if not selected then
+    drawShadow(icon.x, icon.y, icon.w, icon.h, 1)
+  end
+  
+  -- Tile background
   gpu.setBackground(bg)
-  local textX = iconData.x + math.floor((iconData.w - #iconData.label) / 2)
-  gpu.set(textX, iconData.y + iconData.h - 1, iconData.label)
+  gpu.fill(icon.x, icon.y, icon.w, icon.h, " ")
   
-  gpu.setBackground(COLORS.desktop)
+  -- Icon centered
+  gpu.setForeground(COLORS.textOnAccent)
+  local iconX = icon.x + math.floor((icon.w - 2) / 2)
+  local iconY = icon.y + 2
+  gpu.set(iconX, iconY, icon.icon)
+  
+  -- Label centered
+  local textX = icon.x + math.floor((icon.w - #icon.label) / 2)
+  gpu.set(textX, icon.y + icon.h - 1, icon.label)
 end
 
 local function drawTaskbar()
-  -- Основа
-  gpu.setBackground(COLORS.taskbar)
-  gpu.fill(1, h, w, 1, " ")
+  -- Acrylic taskbar with blur effect
+  drawAcrylicRect(1, h, w, 1, COLORS.chromeDark, COLORS.acrylicDark)
   
-  -- Верхня підсвітка
-  gpu.setForeground(COLORS.btnHighlight)
-  for i = 1, w do
-    gpu.set(i, h, "▀")
-  end
+  -- Start button (Windows logo style)
+  local startBg = state.startMenuOpen and COLORS.hoverDark or COLORS.chromeDark
+  gpu.setBackground(startBg)
+  gpu.setForeground(COLORS.textOnAccent)
+  gpu.fill(2, h, 4, 1, " ")
+  gpu.set(2, h, " ⊞ ")
   
-  -- Start button
-  local startW = 11
-  gpu.setBackground(COLORS.startBtn)
-  gpu.setForeground(COLORS.startBtnText)
-  gpu.fill(2, h, startW, 1, " ")
-  gpu.set(3, h, "◢ Start ◣")
+  -- Divider
+  gpu.setForeground(COLORS.divider)
+  gpu.set(6, h, "│")
   
-  gpu.setForeground(COLORS.btnHighlight)
-  gpu.set(2, h, "▌")
-  gpu.setForeground(COLORS.btnShadow)
-  gpu.set(2 + startW - 1, h, "▐")
-  
-  -- Розділювач
-  gpu.setBackground(COLORS.taskbar)
-  gpu.setForeground(COLORS.btnShadow)
-  gpu.set(14, h, "┃")
-  
-  -- Кнопки вікон
-  local btnX = 16
+  -- Window buttons
+  local btnX = 8
   for i, win in ipairs(state.activeWindows) do
-    if btnX + 16 < w - 8 then
+    if btnX + 15 < w - 8 then
       local isFocused = (state.focusedWindow == i)
-      gpu.setBackground(isFocused and COLORS.taskbarDark or COLORS.taskbar)
-      gpu.setForeground(COLORS.black)
-      gpu.fill(btnX, h, 15, 1, " ")
+      local btnBg = isFocused and COLORS.hoverDark or COLORS.chromeDark
       
-      local title = truncate(win.title or "Window", 13)
+      gpu.setBackground(btnBg)
+      gpu.setForeground(COLORS.textOnAccent)
+      gpu.fill(btnX, h, 14, 1, " ")
+      
+      local title = truncate(win.title or "Window", 12)
       gpu.set(btnX + 1, h, title)
       
-      gpu.setForeground(isFocused and COLORS.btnShadow or COLORS.btnHighlight)
-      gpu.set(btnX, h, "▌")
-      gpu.set(btnX + 14, h, "▐")
+      -- Underline for focused
+      if isFocused then
+        gpu.setForeground(COLORS.accentPrimary)
+        gpu.set(btnX, h, "▁")
+        gpu.set(btnX + 13, h, "▁")
+      end
       
-      btnX = btnX + 16
+      btnX = btnX + 15
     end
   end
   
-  -- Годинник
-  gpu.setBackground(COLORS.taskbar)
-  gpu.setForeground(COLORS.black)
+  -- System tray separator
+  gpu.setForeground(COLORS.divider)
+  gpu.set(w - 8, h, "│")
+  
+  -- Clock
+  gpu.setBackground(COLORS.chromeDark)
+  gpu.setForeground(COLORS.textOnAccent)
   local time = os.date("%H:%M")
-  gpu.fill(w - 8, h, 7, 1, " ")
-  gpu.set(w - 7, h, "⏰" .. time)
+  gpu.set(w - 6, h, time)
 end
 
 local function drawDesktop()
-  -- Фон з градієнтом
+  -- Windows 10 blue desktop with gradient effect
   for i = 1, h - 1 do
-    local shade = i % 4 == 0 and 0x007777 or COLORS.desktop
+    local shade = COLORS.desktop
+    if i % 3 == 0 then
+      shade = 0x006BB3
+    elseif i % 5 == 0 then
+      shade = 0x0085E5
+    end
     gpu.setBackground(shade)
     gpu.fill(1, i, w, 1, " ")
   end
   
-  -- Іконки
+  -- Icons
   for i, icon in ipairs(DESKTOP_ICONS) do
-    drawIcon(icon, state.selectedIcon == i)
+    drawModernIcon(icon, state.selectedIcon == i, state.hoverIcon == i)
   end
 end
 
 local function drawWindow(win)
   local wx, wy, ww, wh = win.x, win.y, win.w, win.h
   
-  -- Тінь
-  gpu.setBackground(0x404040)
-  gpu.fill(wx + 2, wy + 2, ww, wh, " ")
+  -- Elevated shadow
+  drawShadow(wx, wy, ww, wh, 3)
   
-  -- Фон вікна
-  gpu.setBackground(COLORS.windowBg)
+  -- Window surface
+  gpu.setBackground(COLORS.surface)
   gpu.fill(wx, wy, ww, wh, " ")
   
-  -- Заголовок
+  -- Title bar
   local isFocused = (state.activeWindows[state.focusedWindow] == win)
-  local titleColor = isFocused and COLORS.windowTitle or COLORS.windowTitleInactive
+  local titleColor = isFocused and COLORS.surface or COLORS.surfaceVariant
   
   gpu.setBackground(titleColor)
-  gpu.setForeground(COLORS.white)
   gpu.fill(wx, wy, ww, 1, " ")
   
-  -- Іконка вікна
-  gpu.set(wx + 1, wy, "▣")
+  -- Title text
+  gpu.setForeground(COLORS.textPrimary)
+  local title = truncate(win.title or "Window", ww - 10)
+  gpu.set(wx + 2, wy, title)
   
-  -- Заголовок
-  local title = truncate(win.title or "Window", ww - 8)
-  gpu.set(wx + 3, wy, title)
+  -- Window controls (modern, flat)
+  local controlX = wx + ww - 9
   
-  -- Кнопки управління
-  gpu.setBackground(COLORS.btnShadow)
-  gpu.setForeground(COLORS.white)
-  gpu.set(wx + ww - 7, wy, "─")
+  -- Minimize
+  gpu.setBackground(titleColor)
+  gpu.setForeground(COLORS.textSecondary)
+  gpu.set(controlX, wy, " ─ ")
   
-  gpu.setBackground(COLORS.success)
-  gpu.set(wx + ww - 5, wy, "□")
+  -- Maximize
+  gpu.set(controlX + 3, wy, " □ ")
   
+  -- Close (red on hover)
   gpu.setBackground(COLORS.error)
-  gpu.set(wx + ww - 3, wy, "×")
+  gpu.setForeground(COLORS.textOnAccent)
+  gpu.set(controlX + 6, wy, " × ")
   
-  -- Рамка
-  draw3DFrame(wx, wy + 1, ww, wh - 1, true)
+  -- Window border (subtle)
+  gpu.setForeground(COLORS.divider)
+  for i = 0, ww - 1 do
+    gpu.setBackground(COLORS.surface)
+    gpu.set(wx + i, wy + 1, "─")
+  end
   
-  -- Контент
+  -- Content
   if win.draw and type(win.draw) == "function" then
     local contentX = wx + 1
     local contentY = wy + 2
@@ -410,60 +556,70 @@ local function drawWindow(win)
     
     local ok, err = safeCall(win.draw, win, gpu, contentX, contentY, contentW, contentH)
     if not ok then
-      gpu.setBackground(COLORS.windowBg)
+      gpu.setBackground(COLORS.surface)
       gpu.setForeground(COLORS.error)
-      gpu.set(contentX + 1, contentY + 1, "Draw error:")
+      gpu.set(contentX + 1, contentY + 1, "Error:")
       gpu.set(contentX + 1, contentY + 2, truncate(tostring(err), contentW - 2))
     end
   end
 end
 
 local function drawStartMenu()
-  local menuW = 30
-  local menuH = 20
-  local menuX = 2
+  -- Modern Start Menu with acrylic
+  local menuW = 38
+  local menuH = 24
+  local menuX = 1
   local menuY = h - menuH - 1
   
-  -- Тінь
-  gpu.setBackground(0x404040)
-  gpu.fill(menuX + 2, menuY + 2, menuW, menuH, " ")
+  -- Shadow
+  drawShadow(menuX, menuY, menuW, menuH, 3)
   
-  -- Фон
-  gpu.setBackground(COLORS.windowBg)
-  gpu.fill(menuX, menuY, menuW, menuH, " ")
+  -- Acrylic background
+  drawAcrylicRect(menuX, menuY, menuW, menuH, COLORS.chromeDark, COLORS.acrylicDark)
   
-  -- Заголовок
-  gpu.setBackground(COLORS.windowTitle)
-  gpu.setForeground(COLORS.white)
+  -- User profile section
+  gpu.setBackground(COLORS.chromeDark)
+  gpu.setForeground(COLORS.textOnAccent)
   gpu.fill(menuX, menuY, menuW, 3, " ")
-  gpu.set(menuX + 6, menuY + 1, "◢ FixOS 3.0 ◣")
+  gpu.set(menuX + 2, menuY + 1, "👤 FixOS User")
   
-  -- Пункти меню
-  gpu.setBackground(COLORS.windowBg)
-  gpu.setForeground(COLORS.black)
+  -- Apps section header
+  gpu.setForeground(COLORS.textSecondary)
+  gpu.set(menuX + 2, menuY + 4, "Apps")
   
-  local items = {
-    {y = 4, text = " ▸ Programs"},
-    {y = 6, text = " ▸ Explorer"},
-    {y = 8, text = " ▸ Terminal"},
-    {y = 10, text = " ▸ Settings"},
-    {y = 12, text = " ℹ About"},
-    {y = 15, text = " ⟳ Update"},
-    {y = 17, text = " ⏻ Shut Down"}
+  -- App tiles (2x3 grid)
+  local tiles = {
+    {x = 2, y = 6, w = 17, h = 4, label = "Programs", icon = "📦", color = COLORS.accentPrimary},
+    {x = 20, y = 6, w = 17, h = 4, label = "Explorer", icon = "📁", color = COLORS.warning},
+    {x = 2, y = 11, w = 17, h = 4, label = "Terminal", icon = "⌘", color = 0x212121},
+    {x = 20, y = 11, w = 17, h = 4, label = "Settings", icon = "⚙", color = COLORS.chromeDark},
+    {x = 2, y = 16, w = 17, h = 4, label = "About", icon = "ℹ", color = COLORS.info},
+    {x = 20, y = 16, w = 17, h = 4, label = "Update", icon = "⟳", color = COLORS.success},
   }
   
-  for _, item in ipairs(items) do
-    gpu.set(menuX + 2, menuY + item.y, item.text)
+  for _, tile in ipairs(tiles) do
+    -- Tile with shadow
+    local tileX = menuX + tile.x
+    local tileY = menuY + tile.y
+    
+    gpu.setBackground(tile.color)
+    gpu.fill(tileX, tileY, tile.w, tile.h, " ")
+    
+    gpu.setForeground(COLORS.textOnAccent)
+    gpu.set(tileX + 2, tileY + 1, tile.icon .. " " .. tile.label)
+    
+    -- Store for clicks
+    tile.absX = tileX
+    tile.absY = tileY
   end
   
-  -- Розділювачі
-  gpu.setForeground(COLORS.btnShadow)
-  gpu.fill(menuX + 1, menuY + 14, menuW - 2, 1, "─")
+  -- Power section at bottom
+  gpu.setBackground(COLORS.error)
+  gpu.setForeground(COLORS.textOnAccent)
+  gpu.fill(menuX, menuY + menuH - 3, menuW, 3, " ")
+  gpu.set(menuX + math.floor(menuW / 2) - 6, menuY + menuH - 2, "⏻ Shut Down")
   
-  -- Рамка
-  draw3DFrame(menuX, menuY, menuW, menuH, true)
-  
-  return items, menuX, menuY
+  return tiles, menuX, menuY
 end
 
 local function redrawAll()
@@ -481,16 +637,16 @@ local function redrawAll()
 end
 
 -- ====================
--- КЕРУВАННЯ ВІКНАМИ
+-- WINDOW MANAGEMENT
 -- ====================
 
 local WINDOW_SIZES = {
-  calculator = {42, 24},
-  notepad = {65, 22},
-  settings = {60, 23},
-  mycomputer = {58, 18},
-  terminal = {70, 24},
-  explorer = {65, 22}
+  calculator = {45, 22},
+  notepad = {68, 24},
+  settings = {62, 24},
+  mycomputer = {60, 20},
+  terminal = {72, 26},
+  explorer = {68, 24}
 }
 
 local function createWindow(title, width, height, programName)
@@ -502,8 +658,8 @@ local function createWindow(title, width, height, programName)
   local winX = math.floor((w - width) / 2) + #state.activeWindows * 2
   local winY = math.floor((h - height) / 2) + #state.activeWindows * 2
   
-  if winY + height > h - 1 then winY = 3 end
-  if winX + width > w then winX = 3 end
+  if winY + height > h - 1 then winY = 2 end
+  if winX + width > w then winX = 2 end
   
   local win = {
     title = title,
@@ -524,9 +680,9 @@ local function createWindow(title, width, height, programName)
     end
   end
   
-  function win:click(clickX, clickY, button)
+  function win:click(x, y, button)
     if self.program and self.program.click then
-      return self.program.click(self, clickX, clickY, button)
+      return self.program.click(self, x, y, button)
     end
     return false
   end
@@ -565,7 +721,7 @@ local function focusWindow(index)
 end
 
 -- ====================
--- ОБРОБНИКИ ПОДІЙ
+-- EVENT HANDLERS
 -- ====================
 
 local function checkIconClick(x, y)
@@ -578,8 +734,12 @@ local function checkIconClick(x, y)
   return nil
 end
 
+local function checkIconHover(x, y)
+  return checkIconClick(x, y)
+end
+
 local function checkStartButton(x, y)
-  return y == h and x >= 2 and x <= 12
+  return y == h and x >= 2 and x <= 5
 end
 
 local function checkWindowClick(x, y)
@@ -596,12 +756,22 @@ end
 local function checkStartMenuClick(x, y)
   if not state.startMenuOpen then return nil end
   
-  local items, menuX, menuY = drawStartMenu()
+  local tiles, menuX, menuY = drawStartMenu()
+  local menuW = 38
+  local menuH = 24
   
-  for i, item in ipairs(items) do
-    if y == menuY + item.y and x >= menuX and x < menuX + 28 then
+  -- Check tiles
+  for i, tile in ipairs(tiles) do
+    if x >= tile.absX and x < tile.absX + tile.w and
+       y >= tile.absY and y < tile.absY + tile.h then
       return i
     end
+  end
+  
+  -- Check power button
+  if y >= menuY + menuH - 3 and y < menuY + menuH and
+     x >= menuX and x < menuX + menuW then
+    return 7  -- Shutdown
   end
   
   return nil
@@ -635,12 +805,11 @@ local function executeMenuAction(action)
       state.activeWindows[#state.activeWindows].selectedTab = 3
     end
   elseif action == 7 then -- Shutdown
-    gpu.setBackground(COLORS.black)
-    gpu.setForeground(COLORS.white)
+    gpu.setBackground(COLORS.accentPrimary)
+    gpu.setForeground(COLORS.textOnAccent)
     gpu.fill(1, 1, w, h, " ")
-    
-    local msg = "Shutting down FixOS 3.0..."
-    gpu.set(math.floor(w/2) - math.floor(#msg/2), math.floor(h/2), msg)
+    local msg = "Shutting down..."
+    gpu.set(math.floor(w/2) - 8, math.floor(h/2), msg)
     os.sleep(0.5)
     computer.shutdown()
   end
@@ -653,23 +822,22 @@ local function updateClock()
   if computer.uptime() - state.clockTimer > 30 then
     state.clockTimer = computer.uptime()
     
-    gpu.setBackground(COLORS.taskbar)
-    gpu.setForeground(COLORS.black)
+    gpu.setBackground(COLORS.chromeDark)
+    gpu.setForeground(COLORS.textOnAccent)
     local time = os.date("%H:%M")
-    gpu.fill(w - 8, h, 7, 1, " ")
-    gpu.set(w - 7, h, "⏰" .. time)
+    gpu.set(w - 6, h, time)
   end
 end
 
 -- ====================
--- ГОЛОВНИЙ ЦИКЛ
+-- MAIN LOOP (OPTIMIZED)
 -- ====================
 
 local function mainLoop()
   redrawAll()
   
   while state.running do
-    local eventData = {computer.pullSignal(0.1)}
+    local eventData = {computer.pullSignal(0.03)}  -- Ultra-fast
     local eventType = eventData[1]
     
     updateClock()
@@ -697,23 +865,20 @@ local function mainLoop()
           if winIndex then
             focusWindow(winIndex)
             
-            -- Закриття
+            -- Close button (right side of title bar)
             if y == win.y and x >= win.x + win.w - 3 and x <= win.x + win.w - 1 then
               closeWindow(#state.activeWindows)
               redrawAll()
               
-            -- Перетягування
-            elseif y == win.y and x >= win.x and x < win.x + win.w - 8 then
+            -- Title bar drag
+            elseif y == win.y and x >= win.x and x < win.x + win.w - 10 then
               state.dragWindow = win
               state.dragOffsetX = x - win.x
               state.dragOffsetY = y - win.y
               
-            -- Клік по контенту
+            -- Content click
             else
-              local clickX = x
-              local clickY = y
-              
-              local ok, needRedraw = safeCall(win.click, win, clickX, clickY, button)
+              local ok, needRedraw = safeCall(win.click, win, x, y, button)
               if ok and needRedraw then
                 redrawAll()
               end
@@ -721,7 +886,6 @@ local function mainLoop()
             
             redrawAll()
           else
-            -- Клік по іконці
             local iconIndex = checkIconClick(x, y)
             if iconIndex then
               if state.selectedIcon == iconIndex then
@@ -778,11 +942,11 @@ local function mainLoop()
     elseif eventType == "key_down" then
       local _, _, char, code = table.unpack(eventData)
       
-      if code == 31 then -- 'S' key для Start menu
+      if code == 31 then -- S key
         state.startMenuOpen = not state.startMenuOpen
         redrawAll()
         
-      elseif code == 45 then -- 'X' key для shutdown
+      elseif code == 45 then -- X key
         executeMenuAction(7)
         
       elseif state.focusedWindow and state.activeWindows[state.focusedWindow] then
@@ -798,14 +962,14 @@ local function mainLoop()
 end
 
 -- ====================
--- ЗАПУСК
+-- STARTUP
 -- ====================
 
 local ok, err = pcall(mainLoop)
 
 if not ok then
-  gpu.setBackground(0x000000)
-  gpu.setForeground(0xFF0000)
+  gpu.setBackground(COLORS.error)
+  gpu.setForeground(COLORS.textOnAccent)
   gpu.fill(1, 1, w, h, " ")
   
   gpu.set(2, 2, "Desktop Error:")
