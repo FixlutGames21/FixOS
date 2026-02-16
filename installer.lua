@@ -1,6 +1,6 @@
 -- ==============================================
--- FixOS 2.0 Installer (ВИПРАВЛЕНО)
--- Покращена версія з правильною структурою
+-- FixOS 3.0 Installer (ОНОВЛЕНО)
+-- Встановлює label "FixOS" на диск
 -- ==============================================
 
 local component = require("component")
@@ -8,7 +8,6 @@ local computer = require("computer")
 local filesystem = require("filesystem")
 local event = require("event")
 
--- ПЕРЕВІРКА КОМПОНЕНТІВ
 local gpu = component.gpu
 local internet = component.isAvailable("internet") and component.internet or nil
 
@@ -16,12 +15,10 @@ if not gpu then
   error("GPU not found!")
 end
 
--- НАЛАШТУВАННЯ ЕКРАНУ
 local w, h = gpu.maxResolution()
 gpu.setResolution(math.min(80, w), math.min(25, h))
 w, h = gpu.getResolution()
 
--- КОЛЬОРИ
 local COLOR = {
   bg = 0x0000AA,
   panel = 0x000080,
@@ -37,20 +34,20 @@ local COLOR = {
   orange = 0xFFAA00
 }
 
--- СПИСОК ФАЙЛІВ ДЛЯ ЗАВАНТАЖЕННЯ
 local FILES = {
-  {path = "init.lua", target = "/init.lua"},
+  {path = "boot/init.lua", target = "/init.lua"},
   {path = "system/desktop.lua", target = "/system/desktop.lua"},
+  {path = "system/icons.lua", target = "/system/icons.lua"},
   {path = "system/programs/calculator.lua", target = "/system/programs/calculator.lua"},
   {path = "system/programs/notepad.lua", target = "/system/programs/notepad.lua"},
   {path = "system/programs/settings.lua", target = "/system/programs/settings.lua"},
   {path = "system/programs/mycomputer.lua", target = "/system/programs/mycomputer.lua"},
+  {path = "system/programs/terminal.lua", target = "/system/programs/terminal.lua"},
+  {path = "system/programs/explorer.lua", target = "/system/programs/explorer.lua"},
   {path = "version.txt", target = "/version.txt"}
 }
 
 local REPO_URL = "https://raw.githubusercontent.com/FixlutGames21/FixOS/main"
-
--- ==================== GUI ФУНКЦІЇ ====================
 
 local function clearScreen()
   gpu.setBackground(COLOR.bg)
@@ -58,15 +55,12 @@ local function clearScreen()
 end
 
 local function drawBox(x, y, width, height, title)
-  -- Тінь
   gpu.setBackground(COLOR.darkGray)
   gpu.fill(x + 1, y + 1, width, height, " ")
   
-  -- Основа
   gpu.setBackground(COLOR.lightGray)
   gpu.fill(x, y, width, height, " ")
   
-  -- Заголовок
   if title then
     gpu.setBackground(COLOR.panel)
     gpu.fill(x, y, width, 2, " ")
@@ -75,7 +69,6 @@ local function drawBox(x, y, width, height, title)
     gpu.set(titleX, y + 1, title)
   end
   
-  -- Рамка (3D ефект)
   gpu.setForeground(COLOR.white)
   for i = 0, width - 1 do gpu.set(x + i, y, "▀") end
   for i = 0, height - 1 do gpu.set(x, y + i, "▌") end
@@ -89,7 +82,6 @@ local function drawButton(x, y, width, label, bgColor)
   gpu.setBackground(bgColor)
   gpu.fill(x, y, width, 3, " ")
   
-  -- 3D ефект
   gpu.setForeground(COLOR.white)
   for i = 0, width - 1 do gpu.set(x + i, y, "▀") end
   for i = 0, 2 do gpu.set(x, y + i, "▌") end
@@ -98,7 +90,6 @@ local function drawButton(x, y, width, label, bgColor)
   for i = 0, width - 1 do gpu.set(x + i, y + 2, "▄") end
   for i = 0, 2 do gpu.set(x + width - 1, y + i, "▐") end
   
-  -- Текст
   gpu.setForeground(COLOR.white)
   local labelX = x + math.floor((width - #label) / 2)
   gpu.set(labelX, y + 1, label)
@@ -131,8 +122,6 @@ local function isInButton(btn, mx, my)
   return mx >= btn.x and mx < btn.x + btn.w and my >= btn.y and my < btn.y + btn.h
 end
 
--- ==================== ФУНКЦІЇ ЗАВАНТАЖЕННЯ ====================
-
 local function downloadFile(url, maxRetries)
   if not internet then return nil, "No Internet Card" end
   
@@ -158,7 +147,6 @@ local function downloadFile(url, maxRetries)
       pcall(handle.close)
       local data = table.concat(result)
       
-      -- Перевірка валідності
       if #data > 0 and not data:match("^%s*<!DOCTYPE") and not data:match("^%s*<html") then
         return data
       end
@@ -171,8 +159,6 @@ local function downloadFile(url, maxRetries)
   
   return nil, "Download failed"
 end
-
--- ==================== ФУНКЦІЇ ДИСКІВ ====================
 
 local function listDisks()
   local disks = {}
@@ -189,7 +175,6 @@ local function listDisks()
       local ok3, total = pcall(proxy.spaceTotal)
       local size = ok3 and total or 0
       
-      -- Фільтруємо маленькі диски (tmpfs)
       if size > 200000 and not diskLabel:match("tmpfs") then
         table.insert(disks, {
           address = addr,
@@ -201,7 +186,6 @@ local function listDisks()
     end
   end
   
-  -- Сортуємо за розміром
   table.sort(disks, function(a, b) return a.size > b.size end)
   return disks
 end
@@ -210,21 +194,18 @@ local function formatDisk(addr)
   local proxy = component.proxy(addr)
   if not proxy then return false, "Cannot access disk" end
   
-  -- ВИПРАВЛЕННЯ: Перевірка read-only
   local ok, ro = pcall(proxy.isReadOnly)
   if ok and ro then
     return false, "Disk is read-only"
   end
   
   local function removeRecursive(path)
-    -- Перевірка валідності шляху
     if not path or path == "" or path == "/" then 
       return 
     end
     
     local ok, isDir = pcall(proxy.isDirectory, path)
     if ok and isDir then
-      -- Це директорія - рекурсивно видаляємо вміст
       local ok2, listFunc = pcall(function() return proxy.list(path) end)
       if ok2 and listFunc and type(listFunc) == "function" then
         for file in listFunc do
@@ -240,15 +221,12 @@ local function formatDisk(addr)
       end
       pcall(proxy.remove, path)
     else
-      -- Це файл - просто видаляємо
       pcall(proxy.remove, path)
     end
   end
   
-  -- Отримуємо список файлів у корені
   local ok, listResult = pcall(function() return proxy.list("/") end)
   if ok and listResult and type(listResult) == "function" then
-    -- listResult - це ітератор-функція
     for file in listResult do
       if file and file ~= "" and file ~= "/" and file ~= "." and file ~= ".." then
         removeRecursive("/" .. file)
@@ -260,7 +238,6 @@ local function formatDisk(addr)
 end
 
 local function writeFileToDisk(proxy, path, content)
-  -- Створення директорій
   local dir = path:match("(.+)/[^/]+$")
   if dir then
     local parts = {}
@@ -280,7 +257,6 @@ local function writeFileToDisk(proxy, path, content)
     end
   end
   
-  -- Запис файлу
   local ok, handle = pcall(proxy.open, path, "w")
   if not ok or not handle then
     return false, "Cannot create file"
@@ -296,21 +272,19 @@ local function writeFileToDisk(proxy, path, content)
   return true
 end
 
--- ==================== ЕКРАНИ ====================
-
 local function welcomeScreen()
   clearScreen()
-  drawBox(8, 2, w - 16, h - 4, "FixOS 2.0 Setup")
+  drawBox(8, 2, w - 16, h - 4, "FixOS 3.0 Setup")
   
-  centerText(6, COLOR.white, "Welcome to FixOS 2.0 Installer")
-  centerText(8, COLOR.orange, "FIXED VERSION - Stable & Working")
+  centerText(6, COLOR.white, "Welcome to FixOS 3.0 Installer")
+  centerText(8, COLOR.orange, "SUPER EDITION - Everything Fixed!")
   
-  centerText(11, COLOR.white, "Improvements:")
+  centerText(11, COLOR.white, "New Features:")
   gpu.setForeground(COLOR.lightGray)
-  gpu.set(15, 13, "• Proper bootloader")
-  gpu.set(15, 14, "• Fixed component API")
-  gpu.set(15, 15, "• Stable desktop")
-  gpu.set(15, 16, "• Working programs")
+  gpu.set(15, 13, "• File Explorer")
+  gpu.set(15, 14, "• Terminal with commands")
+  gpu.set(15, 15, "• Icon system")
+  gpu.set(15, 16, "• Fixed all bugs")
   
   if not internet then
     centerText(19, COLOR.red, "ERROR: Internet Card required!")
@@ -338,7 +312,7 @@ local function selectDiskScreen()
   clearScreen()
   drawBox(8, 2, w - 16, h - 4, "Select Installation Disk")
   
-  centerText(6, COLOR.white, "Choose where to install FixOS 2.0")
+  centerText(6, COLOR.white, "Choose where to install FixOS 3.0")
   centerText(8, COLOR.yellow, "WARNING: Selected disk will be formatted!")
   
   local disks = listDisks()
@@ -404,12 +378,12 @@ end
 
 local function installScreen(disk)
   clearScreen()
-  drawBox(8, 2, w - 16, h - 4, "Installing FixOS 2.0")
+  drawBox(8, 2, w - 16, h - 4, "Installing FixOS 3.0")
   
   local proxy = component.proxy(disk.address)
   
-  -- Етап 1: Форматування
-  centerText(8, COLOR.white, "Step 1/2: Formatting disk...")
+  -- Step 1: Format
+  centerText(8, COLOR.white, "Step 1/3: Formatting disk...")
   centerText(10, COLOR.lightGray, disk.label)
   drawProgressBar(15, 12, w - 30, 0)
   os.sleep(0.5)
@@ -422,12 +396,26 @@ local function installScreen(disk)
     return false
   end
   
-  drawProgressBar(15, 12, w - 30, 0.5)
+  drawProgressBar(15, 12, w - 30, 0.33)
   centerText(14, COLOR.green, "Disk formatted successfully!")
   os.sleep(1)
   
-  -- Етап 2: Завантаження файлів
-  centerText(8, COLOR.white, "Step 2/2: Downloading files...")
+  -- Step 2: Set label to "FixOS"
+  centerText(8, COLOR.white, "Step 2/3: Setting disk label...    ")
+  centerText(10, COLOR.lightGray, "Labeling as 'FixOS'")
+  
+  local labelOk = pcall(proxy.setLabel, "FixOS")
+  if labelOk then
+    centerText(14, COLOR.green, "Disk label set to 'FixOS'!")
+  else
+    centerText(14, COLOR.yellow, "Warning: Could not set label")
+  end
+  
+  drawProgressBar(15, 12, w - 30, 0.5)
+  os.sleep(1)
+  
+  -- Step 3: Download files
+  centerText(8, COLOR.white, "Step 3/3: Downloading files...       ")
   
   local total = #FILES
   local succeeded = 0
@@ -473,7 +461,7 @@ local function installScreen(disk)
     centerText(14, COLOR.green, "Installation complete!            ")
   end
   
-  -- Встановлення boot адреси
+  -- Set boot address
   local bootOk = pcall(computer.setBootAddress, disk.address)
   if bootOk then
     centerText(16, COLOR.green, "Boot address set successfully")
@@ -482,28 +470,27 @@ local function installScreen(disk)
   end
   
   os.sleep(2)
-  return succeeded >= total - 1 -- Дозволяємо 1 помилку
+  return succeeded >= total - 1
 end
 
 local function finishScreen()
   clearScreen()
   drawBox(10, 6, w - 20, 16, "Installation Complete")
   
-  centerText(10, COLOR.green, "FixOS 2.0 installed successfully!")
-  centerText(13, COLOR.white, "The computer will now reboot")
-  centerText(14, COLOR.white, "and start FixOS 2.0")
-  centerText(17, COLOR.orange, "Enjoy your stable OS!")
-  centerText(20, COLOR.lightGray, "Rebooting in 5 seconds...")
+  centerText(10, COLOR.green, "FixOS 3.0 installed successfully!")
+  centerText(12, COLOR.white, "Disk labeled as: FixOS")
+  centerText(14, COLOR.white, "The computer will now reboot")
+  centerText(15, COLOR.white, "and start FixOS 3.0")
+  centerText(18, COLOR.orange, "Enjoy the SUPER EDITION!")
+  centerText(21, COLOR.lightGray, "Rebooting in 5 seconds...")
   
   for i = 5, 1, -1 do
-    centerText(20, COLOR.lightGray, string.format("Rebooting in %d seconds...  ", i))
+    centerText(21, COLOR.lightGray, string.format("Rebooting in %d seconds...  ", i))
     os.sleep(1)
   end
   
   computer.shutdown(true)
 end
-
--- ==================== ГОЛОВНИЙ КОД ====================
 
 local function main()
   if not welcomeScreen() then
@@ -535,7 +522,6 @@ local function main()
   finishScreen()
 end
 
--- Запуск з обробкою помилок
 local ok, err = pcall(main)
 if not ok then
   clearScreen()

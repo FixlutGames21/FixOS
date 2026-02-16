@@ -1,6 +1,6 @@
 -- ==============================================
--- FixOS 2.0 - system/desktop.lua (ПОКРАЩЕНО)
--- Швидший рендеринг + кращий дизайн
+-- FixOS 3.0 - desktop.lua (ПОВНІСТЮ ПЕРЕПИСАНО)
+-- Нова архітектура + splash + іконки
 -- ==============================================
 
 if not component.isAvailable("gpu") then
@@ -16,7 +16,64 @@ end
 
 gpu.bind(screen)
 
--- Завантажуємо налаштування розміру екрану
+-- ====================
+-- SPLASH SCREEN
+-- ====================
+
+local function showSplash()
+  local maxW, maxH = gpu.maxResolution()
+  local w = math.min(80, maxW)
+  local h = math.min(25, maxH)
+  gpu.setResolution(w, h)
+  
+  gpu.setBackground(0x0000AA)
+  gpu.fill(1, 1, w, h, " ")
+  
+  -- Логотип
+  gpu.setForeground(0xFFFFFF)
+  local logo = {
+    "███████╗██╗██╗  ██╗ ██████╗ ███████╗",
+    "██╔════╝██║╚██╗██╔╝██╔═══██╗██╔════╝",
+    "█████╗  ██║ ╚███╔╝ ██║   ██║███████╗",
+    "██╔══╝  ██║ ██╔██╗ ██║   ██║╚════██║",
+    "██║     ██║██╔╝ ██╗╚██████╔╝███████║",
+    "╚═╝     ╚═╝╚═╝  ╚═╝ ╚═════╝ ╚══════╝"
+  }
+  
+  local startY = math.floor(h / 2) - 5
+  for i, line in ipairs(logo) do
+    local x = math.floor((w - #line) / 2)
+    gpu.set(x, startY + i - 1, line)
+  end
+  
+  -- Версія
+  gpu.setForeground(0xFFFF00)
+  local version = "Version 3.0.0 - SUPER EDITION"
+  gpu.set(math.floor((w - #version) / 2), startY + 8, version)
+  
+  -- Loading bar
+  gpu.setForeground(0x00FF00)
+  local barW = 40
+  local barX = math.floor((w - barW) / 2)
+  local barY = startY + 10
+  
+  gpu.set(barX, barY, "[" .. string.rep(" ", barW - 2) .. "]")
+  
+  for i = 1, barW - 2 do
+    gpu.set(barX + i, barY, "█")
+    computer.beep(200 + i * 10, 0.02)
+    os.sleep(0.015)
+  end
+  
+  os.sleep(0.3)
+end
+
+showSplash()
+
+-- ====================
+-- НАЛАШТУВАННЯ ЕКРАНУ
+-- ====================
+
 local function loadResolution()
   local fs = component.proxy(computer.getBootAddress())
   if fs.exists("/settings.cfg") then
@@ -47,45 +104,36 @@ end
 local w, h = gpu.getResolution()
 
 -- ====================
--- ПОКРАЩЕНІ КОЛЬОРИ
+-- ЗАВАНТАЖЕННЯ МОДУЛІВ
+-- ====================
+
+local icons = dofile("/system/icons.lua")
+
+-- ====================
+-- КОЛЬОРИ (ПОКРАЩЕНІ)
 -- ====================
 
 local COLORS = {
-  desktop = 0x008888,      -- Трошки світліший teal
-  taskbar = 0xD3D3D3,      -- Світліший сірий
-  taskbarDark = 0x909090,
-  startBtn = 0x00CC00,     -- Яскравіший зелений
+  desktop = 0x008888,
+  taskbar = 0xD3D3D3,
+  taskbarDark = 0xA0A0A0,
+  startBtn = 0x00CC00,
   startBtnHover = 0x00FF00,
   startBtnText = 0xFFFFFF,
   iconBg = 0x008888,
   iconText = 0xFFFFFF,
-  iconSelected = 0x0000CC, -- Яскравіший синій
-  windowTitle = 0x0000AA,  -- Насиченіший синій
+  iconSelected = 0x0066CC,
+  iconHighlight = 0x00AAFF,
+  windowTitle = 0x0000AA,
+  windowTitleInactive = 0x808080,
   windowBg = 0xD3D3D3,
   white = 0xFFFFFF,
   black = 0x000000,
   btnHighlight = 0xFFFFFF,
-  btnShadow = 0x707070,
+  btnShadow = 0x606060,
   error = 0xFF0000,
-  gray = 0x808080,
-  lightBlue = 0xADD8E6
+  success = 0x00AA00
 }
-
--- ====================
--- ОПТИМІЗАЦІЯ: Кешування останнього стану
--- ====================
-
-local lastState = {
-  desktop = false,
-  taskbar = false,
-  windows = {},
-  startMenu = false
-}
-
-local function needsRedraw(what)
-  if what == "all" then return true end
-  return not lastState[what]
-end
 
 -- ====================
 -- УТИЛІТИ
@@ -109,7 +157,7 @@ local function loadProgram(name)
   end
   
   if type(module) ~= "table" then
-    return nil, "Program must return a table/module"
+    return nil, "Program must return table"
   end
   
   return module
@@ -137,14 +185,46 @@ local function truncate(text, maxLen)
 end
 
 -- ====================
--- ПОКРАЩЕНІ ІКОНКИ
+-- ІКОНКИ РОБОЧОГО СТОЛУ
 -- ====================
 
-local ICONS = {
-  {x = 2, y = 2, w = 14, h = 5, label = "My Computer", icon = "╔══╗\n║PC║\n╚══╝", program = "mycomputer"},
-  {x = 2, y = 8, w = 14, h = 5, label = "Calculator", icon = "┌──┐\n│═╬│\n└──┘", program = "calculator"},
-  {x = 2, y = 14, w = 14, h = 5, label = "Notepad", icon = "┌──┐\n│≡≡│\n└──┘", program = "notepad"},
-  {x = 2, y = 20, w = 14, h = 5, label = "Settings", icon = "╔╦╗\n║⚙║\n╚╩╝", program = "settings"}
+local DESKTOP_ICONS = {
+  {
+    x = 2, y = 2, w = 14, h = 7,
+    label = "My Computer",
+    icon = "computer",
+    program = "mycomputer"
+  },
+  {
+    x = 2, y = 10, w = 14, h = 7,
+    label = "Explorer",
+    icon = "folder",
+    program = "explorer"
+  },
+  {
+    x = 2, y = 18, w = 14, h = 7,
+    label = "Terminal",
+    icon = "terminal",
+    program = "terminal"
+  },
+  {
+    x = 18, y = 2, w = 14, h = 7,
+    label = "Calculator",
+    icon = "calculator",
+    program = "calculator"
+  },
+  {
+    x = 18, y = 10, w = 14, h = 7,
+    label = "Notepad",
+    icon = "notepad",
+    program = "notepad"
+  },
+  {
+    x = 18, y = 18, w = 14, h = 7,
+    label = "Settings",
+    icon = "settings",
+    program = "settings"
+  }
 }
 
 -- ====================
@@ -160,12 +240,11 @@ local state = {
   dragOffsetX = 0,
   dragOffsetY = 0,
   clockTimer = 0,
-  running = true,
-  needsFullRedraw = true
+  running = true
 }
 
 -- ====================
--- ПОКРАЩЕНІ ФУНКЦІЇ МАЛЮВАННЯ
+-- ФУНКЦІЇ МАЛЮВАННЯ
 -- ====================
 
 local function draw3DFrame(x, y, w, h, raised)
@@ -173,56 +252,63 @@ local function draw3DFrame(x, y, w, h, raised)
   local bottomRight = raised and COLORS.btnShadow or COLORS.btnHighlight
   
   gpu.setForeground(topLeft)
-  gpu.fill(x, y, w, 1, "─")
-  gpu.fill(x, y, 1, h, "│")
+  for i = 0, w - 1 do gpu.set(x + i, y, "▀") end
+  for i = 0, h - 1 do gpu.set(x, y + i, "▌") end
   
   gpu.setForeground(bottomRight)
-  gpu.fill(x, y + h - 1, w, 1, "─")
-  gpu.fill(x + w - 1, y, 1, h, "│")
+  for i = 0, w - 1 do gpu.set(x + i, y + h - 1, "▄") end
+  for i = 0, h - 1 do gpu.set(x + w - 1, y + i, "▐") end
 end
 
-local function drawIcon(icon, selected)
+local function drawIcon(iconData, selected)
   local bg = selected and COLORS.iconSelected or COLORS.iconBg
   
   gpu.setBackground(bg)
-  gpu.fill(icon.x, icon.y, icon.w, icon.h, " ")
+  gpu.fill(iconData.x, iconData.y, iconData.w, iconData.h, " ")
   
-  -- Малюємо іконку (багаторядкову)
-  gpu.setForeground(COLORS.iconText)
-  local lines = {}
-  for line in icon.icon:gmatch("[^\n]+") do
-    table.insert(lines, line)
+  -- Рамка при виборі
+  if selected then
+    gpu.setForeground(COLORS.iconHighlight)
+    gpu.set(iconData.x, iconData.y, "┌" .. string.rep("─", iconData.w - 2) .. "┐")
+    gpu.set(iconData.x, iconData.y + iconData.h - 1, "└" .. string.rep("─", iconData.w - 2) .. "┘")
+    for i = 1, iconData.h - 2 do
+      gpu.set(iconData.x, iconData.y + i, "│")
+      gpu.set(iconData.x + iconData.w - 1, iconData.y + i, "│")
+    end
   end
   
-  local startY = icon.y + 1
-  for i, line in ipairs(lines) do
-    local iconX = icon.x + math.floor((icon.w - #line) / 2)
-    gpu.set(iconX, startY + i - 1, line)
-  end
+  -- Іконка
+  local iconX = iconData.x + math.floor((iconData.w - 8) / 2)
+  local iconY = iconData.y + 1
+  icons.draw(gpu, iconData.icon, iconX, iconY, 8, 4, COLORS.iconText)
   
-  -- Текст під іконкою
-  local textX = icon.x + math.floor((icon.w - #icon.label) / 2)
-  gpu.set(textX, icon.y + icon.h - 1, icon.label)
+  -- Текст
+  gpu.setForeground(COLORS.white)
+  gpu.setBackground(bg)
+  local textX = iconData.x + math.floor((iconData.w - #iconData.label) / 2)
+  gpu.set(textX, iconData.y + iconData.h - 1, iconData.label)
   
   gpu.setBackground(COLORS.desktop)
 end
 
 local function drawTaskbar()
+  -- Основа
   gpu.setBackground(COLORS.taskbar)
   gpu.fill(1, h, w, 1, " ")
   
   -- Верхня підсвітка
   gpu.setForeground(COLORS.btnHighlight)
-  gpu.fill(1, h, w, 1, "▀")
+  for i = 1, w do
+    gpu.set(i, h, "▀")
+  end
   
-  -- Кнопка Start (покращена)
+  -- Start button
   local startW = 11
   gpu.setBackground(COLORS.startBtn)
   gpu.setForeground(COLORS.startBtnText)
   gpu.fill(2, h, startW, 1, " ")
   gpu.set(3, h, "◢ Start ◣")
   
-  -- Рамка Start кнопки
   gpu.setForeground(COLORS.btnHighlight)
   gpu.set(2, h, "▌")
   gpu.setForeground(COLORS.btnShadow)
@@ -236,7 +322,7 @@ local function drawTaskbar()
   -- Кнопки вікон
   local btnX = 16
   for i, win in ipairs(state.activeWindows) do
-    if btnX + 15 < w - 8 then
+    if btnX + 16 < w - 8 then
       local isFocused = (state.focusedWindow == i)
       gpu.setBackground(isFocused and COLORS.taskbarDark or COLORS.taskbar)
       gpu.setForeground(COLORS.black)
@@ -245,7 +331,6 @@ local function drawTaskbar()
       local title = truncate(win.title or "Window", 13)
       gpu.set(btnX + 1, h, title)
       
-      -- Рамка кнопки
       gpu.setForeground(isFocused and COLORS.btnShadow or COLORS.btnHighlight)
       gpu.set(btnX, h, "▌")
       gpu.set(btnX + 14, h, "▐")
@@ -254,39 +339,32 @@ local function drawTaskbar()
     end
   end
   
-  -- Годинник (покращений)
+  -- Годинник
   gpu.setBackground(COLORS.taskbar)
   gpu.setForeground(COLORS.black)
   local time = os.date("%H:%M")
   gpu.fill(w - 8, h, 7, 1, " ")
   gpu.set(w - 7, h, "⏰" .. time)
-  
-  lastState.taskbar = true
 end
 
 local function drawDesktop()
-  -- ВИПРАВЛЕННЯ: Завжди малюємо фон при будь-яких змінах
-  gpu.setBackground(COLORS.desktop)
-  gpu.fill(1, 1, w, h - 1, " ")
-  
-  -- Додаємо градієнт-ефект (опціонально)
-  for i = 1, h - 1, 2 do
-    gpu.setBackground(i % 4 == 0 and 0x007777 or COLORS.desktop)
+  -- Фон з градієнтом
+  for i = 1, h - 1 do
+    local shade = i % 4 == 0 and 0x007777 or COLORS.desktop
+    gpu.setBackground(shade)
     gpu.fill(1, i, w, 1, " ")
   end
   
-  for i, icon in ipairs(ICONS) do
+  -- Іконки
+  for i, icon in ipairs(DESKTOP_ICONS) do
     drawIcon(icon, state.selectedIcon == i)
   end
-  
-  lastState.desktop = true
-  state.needsFullRedraw = false
 end
 
 local function drawWindow(win)
   local wx, wy, ww, wh = win.x, win.y, win.w, win.h
   
-  -- Тінь (більш м'яка)
+  -- Тінь
   gpu.setBackground(0x404040)
   gpu.fill(wx + 2, wy + 2, ww, wh, " ")
   
@@ -294,9 +372,9 @@ local function drawWindow(win)
   gpu.setBackground(COLORS.windowBg)
   gpu.fill(wx, wy, ww, wh, " ")
   
-  -- Заголовок (градієнт)
+  -- Заголовок
   local isFocused = (state.activeWindows[state.focusedWindow] == win)
-  local titleColor = isFocused and COLORS.windowTitle or COLORS.btnShadow
+  local titleColor = isFocused and COLORS.windowTitle or COLORS.windowTitleInactive
   
   gpu.setBackground(titleColor)
   gpu.setForeground(COLORS.white)
@@ -305,21 +383,25 @@ local function drawWindow(win)
   -- Іконка вікна
   gpu.set(wx + 1, wy, "▣")
   
+  -- Заголовок
   local title = truncate(win.title or "Window", ww - 8)
   gpu.set(wx + 3, wy, title)
   
-  -- Кнопки керування (покращені)
-  gpu.setBackground(COLORS.gray)
+  -- Кнопки управління
+  gpu.setBackground(COLORS.btnShadow)
+  gpu.setForeground(COLORS.white)
   gpu.set(wx + ww - 7, wy, "─")
-  gpu.setBackground(COLORS.startBtn)
+  
+  gpu.setBackground(COLORS.success)
   gpu.set(wx + ww - 5, wy, "□")
+  
   gpu.setBackground(COLORS.error)
   gpu.set(wx + ww - 3, wy, "×")
   
-  -- Область контенту
+  -- Рамка
   draw3DFrame(wx, wy + 1, ww, wh - 1, true)
   
-  -- Малювання вмісту програми
+  -- Контент
   if win.draw and type(win.draw) == "function" then
     local contentX = wx + 1
     local contentY = wy + 2
@@ -331,14 +413,14 @@ local function drawWindow(win)
       gpu.setBackground(COLORS.windowBg)
       gpu.setForeground(COLORS.error)
       gpu.set(contentX + 1, contentY + 1, "Draw error:")
-      gpu.set(contentX + 1, contentY + 2, truncate(err, contentW - 2))
+      gpu.set(contentX + 1, contentY + 2, truncate(tostring(err), contentW - 2))
     end
   end
 end
 
 local function drawStartMenu()
   local menuW = 30
-  local menuH = 16
+  local menuH = 20
   local menuX = 2
   local menuY = h - menuH - 1
   
@@ -346,56 +428,53 @@ local function drawStartMenu()
   gpu.setBackground(0x404040)
   gpu.fill(menuX + 2, menuY + 2, menuW, menuH, " ")
   
-  -- Фон меню
+  -- Фон
   gpu.setBackground(COLORS.windowBg)
   gpu.fill(menuX, menuY, menuW, menuH, " ")
   
-  -- Заголовок (градієнт)
+  -- Заголовок
   gpu.setBackground(COLORS.windowTitle)
   gpu.setForeground(COLORS.white)
   gpu.fill(menuX, menuY, menuW, 3, " ")
-  gpu.set(menuX + 2, menuY + 1, "◢ FixOS 2.0 ◣")
+  gpu.set(menuX + 6, menuY + 1, "◢ FixOS 3.0 ◣")
   
-  -- Пункти меню (покращені)
+  -- Пункти меню
   gpu.setBackground(COLORS.windowBg)
   gpu.setForeground(COLORS.black)
   
   local items = {
-    {y = 4, text = " ▸ Programs", icon = "📁"},
-    {y = 6, text = " ▸ Settings", icon = "⚙"},
-    {y = 8, text = " ▸ About", icon = "ℹ"},
-    {y = 11, text = " ▸ Update", icon = "⟳"},
-    {y = 13, text = " ⏻ Shut Down", icon = "⏻"}
+    {y = 4, text = " ▸ Programs"},
+    {y = 6, text = " ▸ Explorer"},
+    {y = 8, text = " ▸ Terminal"},
+    {y = 10, text = " ▸ Settings"},
+    {y = 12, text = " ℹ About"},
+    {y = 15, text = " ⟳ Update"},
+    {y = 17, text = " ⏻ Shut Down"}
   }
   
   for _, item in ipairs(items) do
-    -- Фон пункту при наведенні (опціонально)
-    gpu.setBackground(COLORS.windowBg)
     gpu.set(menuX + 2, menuY + item.y, item.text)
   end
   
   -- Розділювачі
   gpu.setForeground(COLORS.btnShadow)
-  gpu.fill(menuX + 1, menuY + 10, menuW - 2, 1, "─")
+  gpu.fill(menuX + 1, menuY + 14, menuW - 2, 1, "─")
   
   -- Рамка
   draw3DFrame(menuX, menuY, menuW, menuH, true)
   
-  lastState.startMenu = true
   return items, menuX, menuY
 end
 
 local function redrawAll()
   drawDesktop()
   
-  -- Малюємо всі вікна
   for i, win in ipairs(state.activeWindows) do
     drawWindow(win)
   end
   
   drawTaskbar()
   
-  -- Малюємо Start menu якщо відкрите
   if state.startMenuOpen then
     drawStartMenu()
   end
@@ -405,10 +484,18 @@ end
 -- КЕРУВАННЯ ВІКНАМИ
 -- ====================
 
+local WINDOW_SIZES = {
+  calculator = {42, 24},
+  notepad = {65, 22},
+  settings = {60, 23},
+  mycomputer = {58, 18},
+  terminal = {70, 24},
+  explorer = {65, 22}
+}
+
 local function createWindow(title, width, height, programName)
   local program, err = loadProgram(programName)
   if not program then
-    print("Failed to load program: " .. tostring(err))
     return nil
   end
   
@@ -428,10 +515,7 @@ local function createWindow(title, width, height, programName)
   }
   
   if program.init then
-    local ok, initErr = safeCall(program.init, win)
-    if not ok then
-      print("Program init error: " .. tostring(initErr))
-    end
+    safeCall(program.init, win)
   end
   
   function win:draw(...)
@@ -440,9 +524,9 @@ local function createWindow(title, width, height, programName)
     end
   end
   
-  function win:click(x, y, button)
+  function win:click(clickX, clickY, button)
     if self.program and self.program.click then
-      return self.program.click(self, x, y, button)
+      return self.program.click(self, clickX, clickY, button)
     end
     return false
   end
@@ -469,9 +553,6 @@ local function closeWindow(index)
     elseif state.focusedWindow > index then
       state.focusedWindow = state.focusedWindow - 1
     end
-    
-    -- ВИПРАВЛЕННЯ: Повне перемалювання після закриття
-    state.needsFullRedraw = true
   end
 end
 
@@ -488,7 +569,7 @@ end
 -- ====================
 
 local function checkIconClick(x, y)
-  for i, icon in ipairs(ICONS) do
+  for i, icon in ipairs(DESKTOP_ICONS) do
     if x >= icon.x and x < icon.x + icon.w and
        y >= icon.y and y < icon.y + icon.h and y < h - 1 then
       return i
@@ -527,14 +608,7 @@ local function checkStartMenuClick(x, y)
 end
 
 local function executeIconAction(program)
-  local windowSizes = {
-    calculator = {42, 24},
-    notepad = {65, 22},
-    settings = {60, 20},
-    mycomputer = {58, 18}
-  }
-  
-  local size = windowSizes[program] or {50, 20}
+  local size = WINDOW_SIZES[program] or {50, 20}
   local title = program:sub(1, 1):upper() .. program:sub(2)
   
   createWindow(title, size[1], size[2], program)
@@ -544,22 +618,29 @@ end
 local function executeMenuAction(action)
   if action == 1 then -- Programs
     executeIconAction("calculator")
-  elseif action == 2 then -- Settings
+  elseif action == 2 then -- Explorer
+    executeIconAction("explorer")
+  elseif action == 3 then -- Terminal
+    executeIconAction("terminal")
+  elseif action == 4 then -- Settings
     executeIconAction("settings")
-  elseif action == 3 then -- About
+  elseif action == 5 then -- About
     executeIconAction("settings")
-  elseif action == 4 then -- Update
+    if state.activeWindows[#state.activeWindows] then
+      state.activeWindows[#state.activeWindows].selectedTab = 4
+    end
+  elseif action == 6 then -- Update
     executeIconAction("settings")
-    -- Після відкриття settings, переключаємо на вкладку Update
-    if state.activeWindows[#state.activeWindows] and 
-       state.activeWindows[#state.activeWindows].program then
+    if state.activeWindows[#state.activeWindows] then
       state.activeWindows[#state.activeWindows].selectedTab = 3
     end
-  elseif action == 5 then -- Shutdown
+  elseif action == 7 then -- Shutdown
     gpu.setBackground(COLORS.black)
     gpu.setForeground(COLORS.white)
     gpu.fill(1, 1, w, h, " ")
-    gpu.set(math.floor(w/2) - 10, math.floor(h/2), "Shutting down...")
+    
+    local msg = "Shutting down FixOS 3.0..."
+    gpu.set(math.floor(w/2) - math.floor(#msg/2), math.floor(h/2), msg)
     os.sleep(0.5)
     computer.shutdown()
   end
@@ -581,14 +662,13 @@ local function updateClock()
 end
 
 -- ====================
--- ГОЛОВНИЙ ЦИКЛ (ОПТИМІЗОВАНИЙ)
+-- ГОЛОВНИЙ ЦИКЛ
 -- ====================
 
 local function mainLoop()
   redrawAll()
   
   while state.running do
-    -- ОПТИМІЗАЦІЯ: Зменшено таймаут до 0.1 сек для швидшого відгуку
     local eventData = {computer.pullSignal(0.1)}
     local eventType = eventData[1]
     
@@ -617,35 +697,35 @@ local function mainLoop()
           if winIndex then
             focusWindow(winIndex)
             
+            -- Закриття
             if y == win.y and x >= win.x + win.w - 3 and x <= win.x + win.w - 1 then
               closeWindow(#state.activeWindows)
               redrawAll()
               
+            -- Перетягування
             elseif y == win.y and x >= win.x and x < win.x + win.w - 8 then
               state.dragWindow = win
               state.dragOffsetX = x - win.x
               state.dragOffsetY = y - win.y
               
+            -- Клік по контенту
             else
-              local relX = x - win.x - 1
-              local relY = y - win.y - 2
+              local clickX = x
+              local clickY = y
               
-              -- ПОКРАЩЕННЯ: Спочатку перевіряємо чи є метод scroll
-              if button == 1 then
-                -- Звичайний клік
-                local ok, needRedraw = safeCall(win.click, win, relX, relY, button)
-                if ok and needRedraw then
-                  redrawAll()
-                end
+              local ok, needRedraw = safeCall(win.click, win, clickX, clickY, button)
+              if ok and needRedraw then
+                redrawAll()
               end
             end
             
             redrawAll()
           else
+            -- Клік по іконці
             local iconIndex = checkIconClick(x, y)
             if iconIndex then
               if state.selectedIcon == iconIndex then
-                executeIconAction(ICONS[iconIndex].program)
+                executeIconAction(DESKTOP_ICONS[iconIndex].program)
                 state.selectedIcon = nil
               else
                 state.selectedIcon = iconIndex
@@ -678,17 +758,14 @@ local function mainLoop()
       state.dragWindow = nil
       
     elseif eventType == "scroll" then
-      -- Підтримка прокрутки колесом миші
       local _, _, x, y, direction = table.unpack(eventData)
       
       if state.focusedWindow and state.activeWindows[state.focusedWindow] then
         local win = state.activeWindows[state.focusedWindow]
         
-        -- Перевіряємо чи клік всередині вікна
         if x >= win.x and x < win.x + win.w and
            y >= win.y and y < win.y + win.h then
           
-          -- Викликаємо scroll метод програми якщо він є
           if win.program and win.program.scroll then
             local ok, needRedraw = safeCall(win.program.scroll, win, direction)
             if ok and needRedraw then
@@ -701,12 +778,12 @@ local function mainLoop()
     elseif eventType == "key_down" then
       local _, _, char, code = table.unpack(eventData)
       
-      if code == 31 then
+      if code == 31 then -- 'S' key для Start menu
         state.startMenuOpen = not state.startMenuOpen
         redrawAll()
         
-      elseif code == 45 then
-        executeMenuAction(5)
+      elseif code == 45 then -- 'X' key для shutdown
+        executeMenuAction(7)
         
       elseif state.focusedWindow and state.activeWindows[state.focusedWindow] then
         local win = state.activeWindows[state.focusedWindow]
