@@ -291,15 +291,13 @@ local function screen_welcome()
     end
 
     if not internet then
-        UI.drawStatusBanner and UI.drawStatusBanner(CX+2, H-6, CW-4, "Internet Card required!", "danger")
-        or (function()
-            gpu.setBackground(T.danger); gpu.fill(CX+2, H-6, CW-4, 1, " ")
-            UI.centerText(CX+2, H-6, CW-4, "Internet Card required!", T.textOnAccent, T.danger)
-        end)()
+        gpu.setBackground(T.danger)
+        gpu.fill(CX+2, H-6, CW-4, 1, " ")
+        UI.centerText(CX+2, H-6, CW-4, "[!!] Internet Card required!", T.textOnAccent, T.danger)
         local btn = UI.drawButton(math.floor(W/2)-7, H-4, 14, 2, "Exit", "secondary")
         while true do
-            local ev,_,x,y = event.pull()
-            if ev=="touch" and UI.hitTest(btn,x,y) then return false end
+            local ev, _, x, y = event.pull()
+            if ev == "touch" and UI.hitTest(btn, x, y) then return false end
         end
     end
 
