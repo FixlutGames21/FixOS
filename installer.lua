@@ -1,924 +1,560 @@
--- ==============================================
--- FixOS 3.1.1 Installer (ULTRA WINDOWS 10)
--- Максимальна схожість з Windows 10 Setup
--- Fluent Design, Acrylic, Reveal effects
--- ==============================================
+-- ==========================================================
+-- FixOS 3.1.2 - installer.lua
+-- FIXES:
+--   - All centering uses UI.centerText (unicode.len inside)
+--   - Card shadow drawn by UI.shadow (below/right only)
+--   - Button centering from UI.drawButton
+--   - Progress bar from UI.drawProgressBar
+--   - PADDING from UI.PADDING
+-- ==========================================================
 
-local component = require("component")
-local computer = require("computer")
-local filesystem = require("filesystem")
-local event = require("event")
+local component  = require("component")
+local computer   = require("computer")
+local event      = require("event")
 
-local gpu = component.gpu
+local gpu      = component.gpu
 local internet = component.isAvailable("internet") and component.internet or nil
 
-if not gpu then
-  error("GPU not found!")
-end
+if not gpu then error("No GPU") end
 
-local w, h = gpu.maxResolution()
-gpu.setResolution(math.min(80, w), math.min(25, h))
-w, h = gpu.getResolution()
+local W, H = gpu.maxResolution()
+gpu.setResolution(math.min(80, W), math.min(25, H))
+W, H = gpu.getResolution()
 
--- ====================
--- FLUENT DESIGN SYSTEM COLORS
--- ====================
-
-local COLOR = {
-  -- Primary Windows 10 colors
-  accentPrimary = 0x0078D7,        -- Signature blue
-  accentSecondary = 0x005A9E,      -- Dark blue
-  accentLight = 0x429CE3,          -- Light blue
-  accentLightest = 0xE3F2FD,       -- Very light blue
-  
-  -- Acrylic backgrounds (simulated blur)
-  acrylicLight = 0xF3F3F3,         -- Light acrylic
-  acrylicDark = 0x2D2D30,          -- Dark acrylic
-  
-  -- Base colors
-  background = 0xFFFFFF,           -- Pure white
-  backgroundAlt = 0xF9F9F9,        -- Alt white
-  
-  -- Chrome colors
-  chromeDark = 0x2D2D30,           -- Dark chrome
-  chromeLight = 0xF0F0F0,          -- Light chrome
-  
-  -- Text colors
-  textPrimary = 0x000000,          -- Black
-  textSecondary = 0x666666,        -- Gray
-  textTertiary = 0x999999,         -- Light gray
-  textDisabled = 0xCCCCCC,         -- Disabled
-  textOnAccent = 0xFFFFFF,         -- White on blue
-  
-  -- UI elements
-  divider = 0xE5E5E5,              -- Divider line
-  border = 0xD1D1D1,               -- Border
-  
-  -- Shadows (for elevation)
-  shadow1 = 0xE8E8E8,              -- Light shadow
-  shadow2 = 0xD0D0D0,              -- Medium shadow
-  shadow3 = 0xB0B0B0,              -- Dark shadow
-  shadow4 = 0x808080,              -- Very dark shadow
-  
-  -- Status colors
-  success = 0x10893E,              -- Green
-  error = 0xE81123,                -- Red
-  warning = 0xFFB900,              -- Orange
-  info = 0x0078D7,                 -- Blue
-  
-  -- Hover states
-  hoverLight = 0xF5F5F5,           -- Light hover
-  hoverAccent = 0x1E8BD7,          -- Blue hover
-  
-  -- Special
-  transparent = 0x000000           -- Transparent placeholder
-}
-
-local FILES = {
-  {path = "boot/init.lua", target = "/init.lua"},
-  {path = "system/desktop.lua", target = "/system/desktop.lua"},
-  {path = "system/programs/calculator.lua", target = "/system/programs/calculator.lua"},
-  {path = "system/programs/notepad.lua", target = "/system/programs/notepad.lua"},
-  {path = "system/programs/settings.lua", target = "/system/programs/settings.lua"},
-  {path = "system/programs/mycomputer.lua", target = "/system/programs/mycomputer.lua"},
-  {path = "system/programs/terminal.lua", target = "/system/programs/terminal.lua"},
-  {path = "system/programs/explorer.lua", target = "/system/programs/explorer.lua"},
-  {path = "version.txt", target = "/version.txt"}
-}
-
-local REPO_URL = "https://raw.githubusercontent.com/FixlutGames21/FixOS/main"
-
--- ====================
--- FLUENT DESIGN UI COMPONENTS
--- ====================
-
-local function clearScreen()
-  gpu.setBackground(COLOR.background)
-  gpu.fill(1, 1, w, h, " ")
-end
-
--- Elevated shadow (multi-layer for depth)
-local function drawElevatedShadow(x, y, width, height, elevation)
-  elevation = elevation or 4
-  
-  for i = 1, elevation do
-    local shadowColor = COLOR.shadow1
-    if i == 2 then shadowColor = COLOR.shadow2
-    elseif i == 3 then shadowColor = COLOR.shadow3
-    elseif i >= 4 then shadowColor = COLOR.shadow4 end
-    
-    gpu.setBackground(shadowColor)
-    
-    -- Shadow extends more as elevation increases
-    for j = 0, i - 1 do
-      -- Bottom shadow
-      gpu.fill(x + i, y + height + j, width, 1, "▄")
-      -- Right shadow
-      for k = 0, height + j - 1 do
-        gpu.set(x + width + i, y + k + 1, "▐")
-      end
+-- Load UI library (installer runs on OC, so dofile works)
+-- If this file runs on a bare OC machine where /system/ui.lua
+-- is not yet installed, fall back to inline stubs below.
+local UI_ok, UI = pcall(dofile, "/system/ui.lua")
+if not UI_ok then
+    -- Minimal inline stubs so the installer still works standalone
+    UI = {}
+    UI.PADDING = 1
+    UI.Theme   = {
+        accent=0x0078D7, accentDark=0x005A9E, accentLight=0x429CE3,
+        surface=0xFFFFFF, surfaceAlt=0xF3F3F3, surfaceInset=0xE8E8E8,
+        chromeDark=0x1F1F1F, chromeMid=0x2D2D30, chromeLight=0xF0F0F0,
+        textPrimary=0x1B1B1B, textSecondary=0x666666, textDisabled=0xAAAAAA,
+        textOnAccent=0xFFFFFF, textOnDark=0xF3F3F3,
+        borderSubtle=0xE5E5E5, divider=0xDDDDDD,
+        shadow0=0xDDDDDD, shadow1=0xC0C0C0, shadow2=0xA0A0A0,
+        success=0x10893E, warning=0xFFB900, danger=0xE81123, info=0x0078D7,
+        progressTrack=0xE0E0E0,
+    }
+    local function ul(s) return (unicode and unicode.len or function(x) return #x end)(tostring(s)) end
+    function UI.init(g) _G._ui_gpu = g end
+    function UI.textLen(s) return ul(s) end
+    function UI.truncate(s, n)
+        s = tostring(s)
+        if ul(s) <= n then return s end
+        local sub = unicode and unicode.sub or string.sub
+        return sub(s, 1, n-1) .. ">"
     end
-  end
-end
-
--- Acrylic card with blur simulation
-local function drawAcrylicCard(x, y, width, height, title, elevated)
-  elevated = elevated == nil and true or elevated
-  
-  -- Elevated shadow
-  if elevated then
-    drawElevatedShadow(x, y, width, height, 4)
-  end
-  
-  -- Acrylic background (simulated with dithering)
-  gpu.setBackground(COLOR.background)
-  gpu.fill(x, y, width, height, " ")
-  
-  -- Subtle acrylic texture
-  for i = 0, height - 1 do
-    for j = 0, width - 1, 3 do
-      if (i + j) % 4 == 0 then
-        gpu.setBackground(COLOR.backgroundAlt)
-        gpu.set(x + j, y + i, " ")
-      end
+    function UI.centerText(x, y, w, str, fg, bg)
+        str = tostring(str)
+        local len = ul(str)
+        local ox  = math.max(0, math.floor((w - len) / 2))
+        if bg then gpu.setBackground(bg) end
+        gpu.setForeground(fg)
+        gpu.set(x + ox, y, str)
     end
-  end
-  
-  -- Title bar with accent
-  if title then
-    gpu.setBackground(COLOR.accentPrimary)
-    gpu.fill(x, y, width, 3, " ")
-    
-    gpu.setForeground(COLOR.textOnAccent)
-    local titleX = x + math.floor((width - #title) / 2)
-    gpu.set(titleX, y + 1, title)
-  end
-  
-  -- Subtle border for definition
-  gpu.setForeground(COLOR.divider)
-  for i = 0, width - 1 do
-    gpu.set(x + i, y, "─")
-    gpu.set(x + i, y + height - 1, "─")
-  end
-  for i = 0, height - 1 do
-    gpu.set(x, y + i, "│")
-    gpu.set(x + width - 1, y + i, "│")
-  end
-  
-  -- Rounded corners effect
-  gpu.setForeground(COLOR.background)
-  gpu.set(x, y, "┌")
-  gpu.set(x + width - 1, y, "┐")
-  gpu.set(x, y + height - 1, "└")
-  gpu.set(x + width - 1, y + height - 1, "┘")
-end
-
--- Modern button with Fluent Design
-local function drawFluentButton(x, y, width, label, style, enabled)
-  enabled = enabled == nil and true or enabled
-  style = style or "accent"
-  
-  local bg = COLOR.accentPrimary
-  local fg = COLOR.textOnAccent
-  
-  if style == "accent" then
-    bg = enabled and COLOR.accentPrimary or COLOR.textDisabled
-    fg = COLOR.textOnAccent
-  elseif style == "secondary" then
-    bg = enabled and COLOR.chromeLight or COLOR.backgroundAlt
-    fg = enabled and COLOR.textPrimary or COLOR.textDisabled
-  elseif style == "success" then
-    bg = enabled and COLOR.success or COLOR.textDisabled
-    fg = COLOR.textOnAccent
-  elseif style == "danger" then
-    bg = enabled and COLOR.error or COLOR.textDisabled
-    fg = COLOR.textOnAccent
-  end
-  
-  -- Button shadow (if enabled)
-  if enabled then
-    gpu.setBackground(COLOR.shadow2)
-    gpu.fill(x + 1, y + 1, width, 2, " ")
-  end
-  
-  -- Button surface
-  gpu.setBackground(bg)
-  gpu.fill(x, y, width, 2, " ")
-  
-  -- Button text (centered)
-  gpu.setForeground(fg)
-  local textX = x + math.floor((width - #label) / 2)
-  gpu.set(textX, y + 1, label)
-  
-  -- Subtle border for depth
-  if enabled then
-    gpu.setForeground(COLOR.accentSecondary)
-    for i = 0, width - 1 do
-      gpu.set(x + i, y, "▀")
-    end
-  end
-  
-  return {x = x, y = y, w = width, h = 2}
-end
-
--- Modern progress bar with ring indicator
-local function drawFluentProgressBar(x, y, width, percent, showRing)
-  showRing = showRing == nil and true or showRing
-  
-  -- Track background
-  gpu.setBackground(COLOR.chromeLight)
-  gpu.fill(x, y, width, 1, " ")
-  
-  -- Filled portion (with gradient effect)
-  local filled = math.floor(width * percent)
-  if filled > 0 then
-    for i = 0, filled - 1 do
-      local shade = COLOR.accentPrimary
-      if i % 3 == 0 then
-        shade = COLOR.accentLight
-      elseif i % 5 == 0 then
-        shade = COLOR.accentSecondary
-      end
-      gpu.setBackground(shade)
-      gpu.set(x + i, y, " ")
-    end
-  end
-  
-  -- Progress indicator
-  if showRing and filled > 0 and filled < width then
-    gpu.setForeground(COLOR.accentPrimary)
-    gpu.setBackground(COLOR.chromeLight)
-    gpu.set(x + filled, y, "●")
-  end
-  
-  -- Percentage text overlay
-  gpu.setForeground(COLOR.textOnAccent)
-  gpu.setBackground(COLOR.accentPrimary)
-  local pctText = string.format("%d%%", math.floor(percent * 100))
-  local pctX = x + math.floor((width - #pctText) / 2)
-  
-  if pctX >= x and pctX < x + filled then
-    gpu.set(pctX, y, pctText)
-  else
-    gpu.setForeground(COLOR.textSecondary)
-    gpu.setBackground(COLOR.chromeLight)
-    gpu.set(pctX, y, pctText)
-  end
-end
-
--- Circular progress indicator (spinner)
-local function drawCircularProgress(x, y, frame)
-  local rings = {"◐", "◓", "◑", "◒"}
-  local char = rings[(frame % #rings) + 1]
-  
-  gpu.setForeground(COLOR.accentPrimary)
-  gpu.setBackground(COLOR.background)
-  gpu.set(x, y, char)
-end
-
--- Status icon
-local function drawStatusIcon(x, y, status)
-  gpu.setBackground(COLOR.background)
-  
-  if status == "success" then
-    gpu.setForeground(COLOR.success)
-    gpu.set(x, y, "✓")
-  elseif status == "error" then
-    gpu.setForeground(COLOR.error)
-    gpu.set(x, y, "✗")
-  elseif status == "warning" then
-    gpu.setForeground(COLOR.warning)
-    gpu.set(x, y, "⚠")
-  elseif status == "info" then
-    gpu.setForeground(COLOR.info)
-    gpu.set(x, y, "ℹ")
-  elseif status == "loading" then
-    gpu.setForeground(COLOR.accentPrimary)
-    gpu.set(x, y, "⟳")
-  end
-end
-
--- Center text helper
-local function centerText(y, color, text, bg)
-  bg = bg or COLOR.background
-  gpu.setForeground(color)
-  gpu.setBackground(bg)
-  local x = math.floor(w / 2 - #text / 2)
-  gpu.set(x, y, text)
-end
-
--- Button click detection
-local function isInButton(btn, mx, my)
-  return mx >= btn.x and mx < btn.x + btn.w and my >= btn.y and my < btn.y + btn.h
-end
-
--- ====================
--- NETWORK FUNCTIONS
--- ====================
-
-local function downloadFile(url, maxRetries)
-  if not internet then return nil, "No Internet Card" end
-  
-  maxRetries = maxRetries or 3
-  
-  for attempt = 1, maxRetries do
-    local success, handle = pcall(internet.request, url)
-    
-    if success and handle then
-      local result = {}
-      local deadline = computer.uptime() + 60
-      
-      while computer.uptime() < deadline do
-        local chunk = handle.read(math.huge)
-        if chunk then
-          table.insert(result, chunk)
-        else
-          break
+    function UI.shadow(x, y, w, h, depth)
+        depth = math.min(depth or 2, 3)
+        local cols = {0xDDDDDD, 0xC0C0C0, 0xA0A0A0}
+        for i = 1, depth do
+            local c = cols[i] or cols[#cols]
+            gpu.setBackground(c)
+            gpu.fill(x + i, y + h + (i-1), w, 1, " ")
+            gpu.fill(x + w + (i-1), y + i, 1, h, " ")
         end
-        os.sleep(0.05)
-      end
-      
-      pcall(handle.close)
-      local data = table.concat(result)
-      
-      if #data > 0 and not data:match("^%s*<!DOCTYPE") and not data:match("^%s*<html") then
-        return data
-      end
     end
-    
-    if attempt < maxRetries then
-      os.sleep(1)
+    function UI.drawButton(x, y, w, h, label, style, enabled)
+        style   = style or "accent"
+        enabled = (enabled == nil) and true or enabled
+        h       = h or 2
+        local T = UI.Theme
+        local bg = enabled and (style=="danger" and T.danger or style=="success" and T.success or style=="secondary" and T.surfaceAlt or T.accent)
+                            or T.surfaceInset
+        local fg = (style=="secondary" and enabled) and T.textPrimary or T.textOnAccent
+        if enabled then
+            gpu.setBackground(T.shadow1)
+            gpu.fill(x+1, y+h, w, 1, " ")
+        end
+        gpu.setBackground(bg)
+        gpu.fill(x, y, w, h, " ")
+        UI.centerText(x, y + math.floor(h/2), w, label, fg, bg)
+        return {x=x, y=y, w=w, h=h}
     end
-  end
-  
-  return nil, "Download failed"
+    function UI.drawProgressBar(x, y, w, percent, barColor)
+        percent  = math.max(0, math.min(1, percent or 0))
+        barColor = barColor or UI.Theme.accent
+        local T  = UI.Theme
+        gpu.setBackground(T.progressTrack)
+        gpu.fill(x, y, w, 1, " ")
+        local filled = math.floor(w * percent)
+        if filled > 0 then
+            gpu.setBackground(barColor)
+            gpu.fill(x, y, filled, 1, " ")
+        end
+        local pct  = math.floor(percent*100) .. "%"
+        local plen = ul(pct)
+        local lx   = x + math.floor((w - plen) / 2)
+        local onB  = lx < x + filled
+        gpu.setForeground(onB and T.textOnAccent or T.textSecondary)
+        gpu.setBackground(onB and barColor       or T.progressTrack)
+        gpu.set(lx, y, pct)
+    end
+    function UI.hitTest(r, mx, my)
+        return mx>=r.x and mx<r.x+r.w and my>=r.y and my<r.y+r.h
+    end
+    function UI.clearScreen(sw, sh, bg)
+        gpu.setBackground(bg or UI.Theme.surface)
+        gpu.fill(1, 1, sw, sh, " ")
+    end
 end
 
--- ====================
--- DISK FUNCTIONS
--- ====================
+UI.init(gpu)
+local T  = UI.Theme
+local P  = UI.PADDING
 
-local function listDisks()
-  local disks = {}
-  
-  for addr in component.list("filesystem") do
-    local proxy = component.proxy(addr)
-    if proxy then
-      local ok, label = pcall(proxy.getLabel)
-      local diskLabel = (ok and label and label ~= "") and label or addr:sub(1, 8)
-      
-      local ok2, readOnly = pcall(proxy.isReadOnly)
-      local isRO = ok2 and readOnly or false
-      
-      local ok3, total = pcall(proxy.spaceTotal)
-      local size = ok3 and total or 0
-      
-      if size > 200000 and not diskLabel:match("tmpfs") then
-        table.insert(disks, {
-          address = addr,
-          label = diskLabel,
-          size = size,
-          readOnly = isRO
-        })
-      end
+-- ----------------------------------------------------------
+-- FILES TO DOWNLOAD
+-- ----------------------------------------------------------
+local FILES = {
+    { path="boot/init.lua",                     target="/init.lua"                       },
+    { path="system/ui.lua",                     target="/system/ui.lua"                  },
+    { path="system/desktop.lua",                target="/system/desktop.lua"             },
+    { path="system/programs/calculator.lua",    target="/system/programs/calculator.lua" },
+    { path="system/programs/notepad.lua",       target="/system/programs/notepad.lua"    },
+    { path="system/programs/settings.lua",      target="/system/programs/settings.lua"   },
+    { path="system/programs/mycomputer.lua",    target="/system/programs/mycomputer.lua" },
+    { path="system/programs/terminal.lua",      target="/system/programs/terminal.lua"   },
+    { path="system/programs/explorer.lua",      target="/system/programs/explorer.lua"   },
+    { path="version.txt",                       target="/version.txt"                    },
+}
+
+local REPO = "https://raw.githubusercontent.com/FixlutGames21/FixOS/main"
+
+-- ----------------------------------------------------------
+-- CARD HELPER
+-- Draws a floating card (accent title bar + white body + shadow).
+-- Returns y of first usable content row inside the card.
+-- ----------------------------------------------------------
+local function drawCard(cx, cy, cw, ch, title)
+    UI.shadow(cx, cy, cw, ch, 2)
+
+    -- Body
+    gpu.setBackground(T.surface)
+    gpu.fill(cx, cy, cw, ch, " ")
+
+    -- Accent header (3 rows)
+    gpu.setBackground(T.accent)
+    gpu.fill(cx, cy, cw, 3, " ")
+    if title then
+        UI.centerText(cx, cy + 1, cw, title, T.textOnAccent, T.accent)
     end
-  end
-  
-  table.sort(disks, function(a, b) return a.size > b.size end)
-  return disks
+
+    -- Subtle border
+    gpu.setForeground(T.borderSubtle)
+    gpu.setBackground(T.surface)
+    for col = 0, cw - 1 do
+        gpu.set(cx + col, cy + ch - 1, "\xE2\x94\x80")
+    end
+    for row = 3, ch - 2 do
+        gpu.set(cx,        cy + row, "\xE2\x94\x82")
+        gpu.set(cx+cw - 1, cy + row, "\xE2\x94\x82")
+    end
+    gpu.set(cx,        cy + ch - 1, "\xE2\x94\x94")
+    gpu.set(cx + cw-1, cy + ch - 1, "\xE2\x94\x98")
+
+    return cy + 4   -- first content row inside card
+end
+
+-- Status icon (no emoji; pure ASCII)
+local function statusIcon(x, y, kind)
+    local map = { success="[OK]", warning="[!!]", danger="[XX]",
+                  info="[i] ", loading="[~] " }
+    local col = { success=T.success, warning=T.warning, danger=T.danger,
+                  info=T.info,       loading=T.accent }
+    gpu.setForeground(col[kind] or T.info)
+    gpu.setBackground(T.surface)
+    gpu.set(x, y, map[kind] or "[?] ")
+end
+
+-- Centre helpers that use UI.centerText
+local function cText(y, str, fg, bg)
+    UI.centerText(1, y, W, str, fg, bg or T.surface)
+end
+
+-- ----------------------------------------------------------
+-- NETWORK
+-- ----------------------------------------------------------
+local function download(url, retries)
+    if not internet then return nil, "No Internet Card" end
+    retries = retries or 3
+    for attempt = 1, retries do
+        local ok, h = pcall(internet.request, url)
+        if ok and h then
+            local buf = {}; local t0 = computer.uptime() + 60
+            while computer.uptime() < t0 do
+                local c = h.read(math.huge)
+                if c then table.insert(buf, c) else break end
+                os.sleep(0.05)
+            end
+            pcall(h.close)
+            local data = table.concat(buf)
+            if #data > 0 and not data:match("^%s*<!DOCTYPE") then return data end
+        end
+        if attempt < retries then os.sleep(1) end
+    end
+    return nil, "Download failed"
+end
+
+-- ----------------------------------------------------------
+-- DISK
+-- ----------------------------------------------------------
+local function listDisks()
+    local out = {}
+    for addr in component.list("filesystem") do
+        local proxy = component.proxy(addr)
+        if proxy then
+            local _, lbl = pcall(proxy.getLabel); lbl = (lbl and lbl ~= "") and lbl or addr:sub(1,8)
+            local _, ro  = pcall(proxy.isReadOnly)
+            local _, tot = pcall(proxy.spaceTotal)
+            tot = tot or 0
+            if tot > 200000 and not lbl:match("tmpfs") then
+                table.insert(out, {address=addr, label=lbl, size=tot, readOnly=ro})
+            end
+        end
+    end
+    table.sort(out, function(a,b) return a.size > b.size end)
+    return out
 end
 
 local function formatDisk(addr)
-  local proxy = component.proxy(addr)
-  if not proxy then return false, "Cannot access disk" end
-  
-  local ok, ro = pcall(proxy.isReadOnly)
-  if ok and ro then
-    return false, "Disk is read-only"
-  end
-  
-  local function removeRecursive(path)
-    if not path or path == "" or path == "/" then 
-      return 
+    local proxy = component.proxy(addr)
+    if not proxy then return false end
+    local function rm(path)
+        local _, isD = pcall(proxy.isDirectory, path)
+        if isD then
+            local _, lf = pcall(function() return proxy.list(path) end)
+            if lf then for f in lf do rm(path..(path:match("/$") and "" or "/")..f) end end
+            pcall(proxy.remove, path)
+        else pcall(proxy.remove, path) end
     end
-    
-    local ok, isDir = pcall(proxy.isDirectory, path)
-    if ok and isDir then
-      local ok2, listFunc = pcall(function() return proxy.list(path) end)
-      if ok2 and listFunc and type(listFunc) == "function" then
-        for file in listFunc do
-          if file and file ~= "" and file ~= "." and file ~= ".." then
-            local fullPath = path
-            if not fullPath:match("/$") then
-              fullPath = fullPath .. "/"
-            end
-            fullPath = fullPath .. file
-            removeRecursive(fullPath)
-          end
-        end
-      end
-      pcall(proxy.remove, path)
-    else
-      pcall(proxy.remove, path)
-    end
-  end
-  
-  local ok, listResult = pcall(function() return proxy.list("/") end)
-  if ok and listResult and type(listResult) == "function" then
-    for file in listResult do
-      if file and file ~= "" and file ~= "/" and file ~= "." and file ~= ".." then
-        removeRecursive("/" .. file)
-      end
-    end
-  end
-  
-  return true
+    local _, lf = pcall(function() return proxy.list("/") end)
+    if lf then for f in lf do rm("/"..f) end end
+    return true
 end
 
-local function writeFileToDisk(proxy, path, content)
-  local dir = path:match("(.+)/[^/]+$")
-  if dir then
-    local parts = {}
-    for part in dir:gmatch("[^/]+") do
-      table.insert(parts, part)
-    end
-    
-    local currentPath = ""
-    for _, part in ipairs(parts) do
-      currentPath = currentPath .. "/" .. part
-      if not proxy.exists(currentPath) then
-        local ok, err = pcall(proxy.makeDirectory, currentPath)
-        if not ok then
-          return false, "Cannot create directory"
+local function writeToDisk(proxy, path, content)
+    local dir = path:match("(.+)/[^/]+$")
+    if dir then
+        local cur = ""
+        for part in dir:gmatch("[^/]+") do
+            cur = cur .. "/" .. part
+            if not proxy.exists(cur) then pcall(proxy.makeDirectory, cur) end
         end
-      end
     end
-  end
-  
-  local ok, handle = pcall(proxy.open, path, "w")
-  if not ok or not handle then
-    return false, "Cannot create file"
-  end
-  
-  local writeOk, writeErr = pcall(proxy.write, handle, content)
-  pcall(proxy.close, handle)
-  
-  if not writeOk then
-    return false, "Write error"
-  end
-  
-  return true
+    local _, h = pcall(proxy.open, path, "w")
+    if not h then return false end
+    local ok = pcall(proxy.write, h, content)
+    pcall(proxy.close, h)
+    return ok
 end
 
--- ====================
--- SETUP SCREENS (ULTRA WINDOWS 10)
--- ====================
+-- ----------------------------------------------------------
+-- SCREENS
+-- ----------------------------------------------------------
 
-local function welcomeScreen()
-  clearScreen()
-  
-  -- Main card (elevated)
-  drawAcrylicCard(8, 2, w - 16, h - 4, "FixOS 3.1.1 Setup", true)
-  
-  -- Welcome message
-  gpu.setBackground(COLOR.background)
-  gpu.setForeground(COLOR.accentPrimary)
-  centerText(6, COLOR.accentPrimary, "Welcome to FixOS Setup", COLOR.background)
-  
-  gpu.setForeground(COLOR.textSecondary)
-  centerText(7, COLOR.textSecondary, "MAXIMUM WINDOWS 10 EDITION", COLOR.background)
-  
-  -- Feature list with icons
-  gpu.setBackground(COLOR.background)
-  gpu.setForeground(COLOR.textPrimary)
-  
-  local features = {
-    {icon = "✓", text = "Fluent Design System", color = COLOR.success},
-    {icon = "✓", text = "Acrylic & Reveal Effects", color = COLOR.success},
-    {icon = "✓", text = "Ultra-Fast Performance", color = COLOR.success},
-    {icon = "✓", text = "Modern UI Components", color = COLOR.success},
-    {icon = "✓", text = "Windows 10 Style", color = COLOR.success},
-    {icon = "✓", text = "Professional Experience", color = COLOR.success}
-  }
-  
-  local startY = 10
-  for i, feature in ipairs(features) do
-    gpu.setForeground(feature.color)
-    gpu.set(15, startY + i - 1, feature.icon)
-    gpu.setForeground(COLOR.textPrimary)
-    gpu.set(18, startY + i - 1, feature.text)
-  end
-  
-  -- Internet check
-  if not internet then
-    drawStatusIcon(math.floor(w/2) - 1, h - 7, "error")
-    gpu.setForeground(COLOR.error)
-    centerText(h - 7, COLOR.error, "  Internet Card required!", COLOR.background)
-    gpu.setForeground(COLOR.textSecondary)
-    centerText(h - 6, COLOR.textSecondary, "Insert Internet Card and restart", COLOR.background)
-    
-    local btnOk = drawFluentButton(math.floor(w/2) - 7, h - 4, 14, "Exit", "secondary")
-    
+local function screen_welcome()
+    UI.clearScreen(W, H)
+
+    local CX, CY, CW, CH = 8, 2, W-16, H-4
+    local contentY = drawCard(CX, CY, CW, CH, "FixOS 3.1.2 Setup")
+
+    gpu.setBackground(T.surface)
+    UI.centerText(CX, contentY,     CW, "Welcome to FixOS Setup",   T.accent, T.surface)
+    UI.centerText(CX, contentY + 1, CW, "PIXEL PERFECT EDITION",    T.textSecondary, T.surface)
+
+    local features = {
+        "[OK] Pixel-Perfect UI Library",
+        "[OK] unicode.len() everywhere",
+        "[OK] Shadow outside window only",
+        "[OK] Strict tile grid (2 cols)",
+        "[OK] PADDING constant system",
+        "[OK] Central Theme table",
+    }
+    for i, f in ipairs(features) do
+        gpu.setForeground(T.success)
+        gpu.setBackground(T.surface)
+        gpu.set(CX + 4, contentY + 2 + i, f)
+    end
+
+    if not internet then
+        UI.drawStatusBanner and UI.drawStatusBanner(CX+2, H-6, CW-4, "Internet Card required!", "danger")
+        or (function()
+            gpu.setBackground(T.danger); gpu.fill(CX+2, H-6, CW-4, 1, " ")
+            UI.centerText(CX+2, H-6, CW-4, "Internet Card required!", T.textOnAccent, T.danger)
+        end)()
+        local btn = UI.drawButton(math.floor(W/2)-7, H-4, 14, 2, "Exit", "secondary")
+        while true do
+            local ev,_,x,y = event.pull()
+            if ev=="touch" and UI.hitTest(btn,x,y) then return false end
+        end
+    end
+
+    local btnNext   = UI.drawButton(W-28, H-4, 12, 2, "Next ->",  "accent")
+    local btnCancel = UI.drawButton(W-15, H-4, 12, 2, "Cancel",   "secondary")
+
     while true do
-      local ev, _, x, y = event.pull()
-      if ev == "touch" and isInButton(btnOk, x, y) then
-        return false
-      end
-    end
-  end
-  
-  -- Action buttons
-  local btnNext = drawFluentButton(w - 28, h - 4, 12, "Next →", "accent")
-  local btnCancel = drawFluentButton(w - 15, h - 4, 12, "Cancel", "secondary")
-  
-  while true do
-    local ev, _, x, y = event.pull()
-    if ev == "touch" then
-      if isInButton(btnNext, x, y) then return true
-      elseif isInButton(btnCancel, x, y) then return false end
-    elseif ev == "key_down" then
-      if _ == 28 then return true end
-      if _ == 1 then return false end
-    end
-  end
-end
-
-local function selectDiskScreen()
-  clearScreen()
-  
-  drawAcrylicCard(8, 2, w - 16, h - 4, "Choose Installation Drive", true)
-  
-  gpu.setBackground(COLOR.background)
-  gpu.setForeground(COLOR.textPrimary)
-  centerText(6, COLOR.textPrimary, "Select where to install FixOS 3.1.1", COLOR.background)
-  
-  -- Warning banner
-  gpu.setBackground(COLOR.warning)
-  gpu.fill(10, 8, w - 20, 1, " ")
-  gpu.setForeground(COLOR.textOnAccent)
-  centerText(8, COLOR.textOnAccent, "⚠ All data on selected drive will be erased", COLOR.warning)
-  
-  gpu.setBackground(COLOR.background)
-  
-  local disks = listDisks()
-  
-  if #disks == 0 then
-    drawStatusIcon(math.floor(w/2) - 8, 12, "error")
-    gpu.setForeground(COLOR.error)
-    centerText(12, COLOR.error, "  No suitable drives found", COLOR.background)
-    gpu.setForeground(COLOR.textSecondary)
-    centerText(14, COLOR.textSecondary, "Please insert a drive and restart", COLOR.background)
-    
-    local btnBack = drawFluentButton(math.floor(w/2) - 7, h - 4, 14, "← Back", "secondary")
-    event.pull("touch")
-    return nil
-  end
-  
-  local buttons = {}
-  local startY = 11
-  
-  for i, disk in ipairs(disks) do
-    if startY + (i - 1) * 4 < h - 8 then
-      -- Disk card
-      local cardX = 12
-      local cardY = startY + (i - 1) * 4
-      local cardW = w - 24
-      
-      -- Disk icon
-      gpu.setBackground(COLOR.backgroundAlt)
-      gpu.fill(cardX, cardY, cardW, 3, " ")
-      
-      local icon = disk.readOnly and "🔒" or "💾"
-      gpu.setForeground(COLOR.accentPrimary)
-      gpu.set(cardX + 2, cardY + 1, icon)
-      
-      -- Disk info
-      gpu.setForeground(disk.readOnly and COLOR.textDisabled or COLOR.textPrimary)
-      local sizeText = string.format("%.1f MB", disk.size / (1024 * 1024))
-      local info = string.format("%s (%s)", disk.label, sizeText)
-      gpu.set(cardX + 5, cardY + 1, info)
-      
-      if disk.readOnly then
-        gpu.setForeground(COLOR.error)
-        gpu.set(cardX + cardW - 12, cardY + 1, "READ-ONLY")
-      end
-      
-      -- Button
-      local btn = drawFluentButton(cardX + 2, cardY + 2, cardW - 4, "Select this drive", 
-                                    disk.readOnly and "secondary" or "accent", 
-                                    not disk.readOnly)
-      btn.disk = disk
-      table.insert(buttons, btn)
-    end
-  end
-  
-  local btnBack = drawFluentButton(w - 15, h - 4, 12, "← Back", "secondary")
-  table.insert(buttons, btnBack)
-  
-  while true do
-    local ev, _, x, y = event.pull()
-    if ev == "touch" then
-      for _, btn in ipairs(buttons) do
-        if isInButton(btn, x, y) then
-          if btn == btnBack then return nil
-          elseif btn.disk and not btn.disk.readOnly then return btn.disk end
+        local ev,_,x,y,_ = event.pull()
+        if ev=="touch" then
+            if UI.hitTest(btnNext,   x, y) then return true  end
+            if UI.hitTest(btnCancel, x, y) then return false end
+        elseif ev=="key_down" then
+            if _ == 28 then return true  end
+            if _ == 1  then return false end
         end
-      end
     end
-  end
 end
 
-local function confirmScreen(disk)
-  clearScreen()
-  
-  drawAcrylicCard(12, 6, w - 24, 16, "Confirm Installation", true)
-  
-  gpu.setBackground(COLOR.background)
-  
-  -- Warning icon and message
-  drawStatusIcon(math.floor(w/2) - 1, 10, "warning")
-  gpu.setForeground(COLOR.textPrimary)
-  centerText(10, COLOR.textPrimary, "  Ready to install", COLOR.background)
-  
-  gpu.setForeground(COLOR.textSecondary)
-  centerText(12, COLOR.textSecondary, "Installation will:", COLOR.background)
-  centerText(13, COLOR.textSecondary, "• Format the selected drive", COLOR.background)
-  centerText(14, COLOR.textSecondary, "• Install FixOS 3.1.1", COLOR.background)
-  centerText(15, COLOR.textSecondary, "• Set boot configuration", COLOR.background)
-  
-  -- Drive info
-  gpu.setBackground(COLOR.backgroundAlt)
-  gpu.fill(14, 17, w - 28, 3, " ")
-  
-  gpu.setForeground(COLOR.accentPrimary)
-  gpu.set(16, 18, "💾 Drive: " .. disk.label)
-  gpu.setForeground(COLOR.textSecondary)
-  local addrText = "   (" .. disk.address:sub(1, 8) .. ")"
-  gpu.set(16, 19, addrText)
-  
-  gpu.setBackground(COLOR.background)
-  
-  -- Buttons
-  local btnInstall = drawFluentButton(math.floor(w/2) - 20, 21, 18, "Install Now", "accent")
-  local btnCancel = drawFluentButton(math.floor(w/2) + 2, 21, 18, "Cancel", "secondary")
-  
-  while true do
-    local ev, _, x, y = event.pull()
-    if ev == "touch" then
-      if isInButton(btnInstall, x, y) then return true
-      elseif isInButton(btnCancel, x, y) then return false end
+local function screen_disk()
+    UI.clearScreen(W, H)
+    local CX, CY, CW, CH = 8, 2, W-16, H-4
+    local contentY = drawCard(CX, CY, CW, CH, "Choose Installation Drive")
+
+    gpu.setBackground(T.surface)
+    UI.centerText(CX, contentY, CW, "Select the drive for FixOS 3.1.2", T.textPrimary, T.surface)
+
+    -- Warning banner
+    gpu.setBackground(T.warning)
+    gpu.fill(CX+2, contentY+2, CW-4, 1, " ")
+    UI.centerText(CX+2, contentY+2, CW-4, "[!!] All data will be erased!", T.textOnAccent, T.warning)
+
+    local disks = listDisks()
+    local buttons = {}
+
+    if #disks == 0 then
+        UI.centerText(CX, contentY+4, CW, "No suitable drives found", T.danger, T.surface)
+        local b = UI.drawButton(math.floor(W/2)-7, H-4, 14, 2, "<- Back", "secondary")
+        event.pull("touch")
+        return nil
     end
-  end
+
+    gpu.setBackground(T.surface)
+    local dy = contentY + 4
+    for _, disk in ipairs(disks) do
+        if dy + 4 < H - 6 then
+            -- mini card per disk
+            gpu.setBackground(T.surfaceAlt)
+            gpu.fill(CX+2, dy, CW-4, 3, " ")
+            gpu.setForeground(T.accent)
+            gpu.setBackground(T.surfaceAlt)
+            local sz  = string.format("%.1f MB", disk.size/(1024*1024))
+            local lbl = string.format("[D] %s (%s)", disk.label, sz)
+            if disk.readOnly then lbl = lbl .. " [READ-ONLY]" end
+            gpu.set(CX+4, dy+1, lbl)
+
+            local btn = UI.drawButton(CX+2, dy+2, CW-4, 2,
+                disk.readOnly and "Read-Only - Unavailable" or "Select this drive",
+                disk.readOnly and "secondary" or "accent",
+                not disk.readOnly)
+            btn.disk = disk
+            table.insert(buttons, btn)
+            dy = dy + 5
+        end
+    end
+
+    local btnBack = UI.drawButton(W-15, H-4, 12, 2, "<- Back", "secondary")
+    table.insert(buttons, btnBack)
+
+    while true do
+        local ev,_,x,y = event.pull()
+        if ev=="touch" then
+            for _, btn in ipairs(buttons) do
+                if UI.hitTest(btn, x, y) then
+                    if btn == btnBack then return nil
+                    elseif btn.disk and not btn.disk.readOnly then return btn.disk end
+                end
+            end
+        end
+    end
 end
 
-local function installScreen(disk)
-  clearScreen()
-  
-  drawAcrylicCard(8, 2, w - 16, h - 4, "Installing FixOS 3.1.1", true)
-  
-  local proxy = component.proxy(disk.address)
-  local spinnerFrame = 0
-  
-  gpu.setBackground(COLOR.background)
-  
-  -- Step 1: Format
-  gpu.setForeground(COLOR.accentPrimary)
-  centerText(6, COLOR.accentPrimary, "Preparing drive...", COLOR.background)
-  
-  gpu.setForeground(COLOR.textSecondary)
-  centerText(7, COLOR.textSecondary, disk.label, COLOR.background)
-  
-  drawFluentProgressBar(15, 9, w - 30, 0, true)
-  drawCircularProgress(math.floor(w/2), 11, spinnerFrame)
-  
-  gpu.setForeground(COLOR.textTertiary)
-  centerText(13, COLOR.textTertiary, "This may take a moment...", COLOR.background)
-  
-  os.sleep(0.3)
-  
-  local ok, err = formatDisk(disk.address)
-  if not ok then
-    drawStatusIcon(math.floor(w/2) - 8, 15, "error")
-    gpu.setForeground(COLOR.error)
-    centerText(15, COLOR.error, "  Format failed", COLOR.background)
-    gpu.setForeground(COLOR.textSecondary)
-    local errMsg = tostring(err)
-    if #errMsg > w - 20 then errMsg = errMsg:sub(1, w - 23) .. "..." end
-    centerText(16, COLOR.textSecondary, errMsg, COLOR.background)
-    
-    drawFluentButton(math.floor(w/2) - 7, h - 4, 14, "Exit", "secondary")
-    event.pull("touch")
-    return false
-  end
-  
-  drawFluentProgressBar(15, 9, w - 30, 0.33, true)
-  drawStatusIcon(math.floor(w/2) - 7, 15, "success")
-  gpu.setForeground(COLOR.success)
-  centerText(15, COLOR.success, "  Drive prepared", COLOR.background)
-  os.sleep(0.5)
-  
-  -- Step 2: Label
-  clearScreen()
-  drawAcrylicCard(8, 2, w - 16, h - 4, "Installing FixOS 3.1.1", true)
-  gpu.setBackground(COLOR.background)
-  
-  gpu.setForeground(COLOR.accentPrimary)
-  centerText(6, COLOR.accentPrimary, "Configuring system...", COLOR.background)
-  
-  gpu.setForeground(COLOR.textSecondary)
-  centerText(7, COLOR.textSecondary, "Setting drive label", COLOR.background)
-  
-  drawFluentProgressBar(15, 9, w - 30, 0.5, true)
-  spinnerFrame = spinnerFrame + 3
-  drawCircularProgress(math.floor(w/2), 11, spinnerFrame)
-  
-  local labelOk = pcall(proxy.setLabel, "FixOS")
-  
-  drawFluentProgressBar(15, 9, w - 30, 0.6, true)
-  drawStatusIcon(math.floor(w/2) - 7, 13, labelOk and "success" or "warning")
-  gpu.setForeground(labelOk and COLOR.success or COLOR.warning)
-  centerText(13, labelOk and COLOR.success or COLOR.warning, 
-             labelOk and "  Drive labeled" or "  Label skipped", COLOR.background)
-  os.sleep(0.5)
-  
-  -- Step 3: Download
-  clearScreen()
-  drawAcrylicCard(8, 2, w - 16, h - 4, "Installing FixOS 3.1.1", true)
-  gpu.setBackground(COLOR.background)
-  
-  gpu.setForeground(COLOR.accentPrimary)
-  centerText(6, COLOR.accentPrimary, "Downloading system files...", COLOR.background)
-  
-  local total = #FILES
-  local succeeded = 0
-  
-  for i, file in ipairs(FILES) do
-    local fileName = file.path
-    if #fileName > 40 then
-      fileName = "..." .. fileName:sub(-37)
+local function screen_confirm(disk)
+    UI.clearScreen(W, H)
+    local CX, CY, CW, CH = 12, 6, W-24, 16
+    local contentY = drawCard(CX, CY, CW, CH, "Confirm Installation")
+
+    gpu.setBackground(T.surface)
+    statusIcon(math.floor(W/2)-2, contentY, "warning")
+    UI.centerText(CX, contentY, CW, "    Ready to install FixOS 3.1.2", T.textPrimary, T.surface)
+
+    local steps = {"Format the selected drive", "Download & install FixOS", "Set boot address"}
+    for i, s in ipairs(steps) do
+        gpu.setForeground(T.textSecondary)
+        gpu.set(CX+4, contentY+2+i, "- " .. s)
     end
-    
-    gpu.setForeground(COLOR.textSecondary)
-    gpu.fill(10, 8, w - 20, 1, " ")
-    centerText(8, COLOR.textSecondary, fileName, COLOR.background)
-    
-    local progress = 0.6 + ((i - 1) / total) * 0.4
-    drawFluentProgressBar(15, 10, w - 30, progress, true)
-    
-    spinnerFrame = spinnerFrame + 1
-    drawCircularProgress(math.floor(w/2), 12, spinnerFrame)
-    
-    drawStatusIcon(math.floor(w/2) - 6, 14, "loading")
-    gpu.setForeground(COLOR.info)
-    centerText(14, COLOR.info, "  Downloading...", COLOR.background)
-    
-    local url = REPO_URL .. "/" .. file.path
-    local data, downloadErr = downloadFile(url, 3)
-    
-    if data then
-      drawStatusIcon(math.floor(w/2) - 5, 14, "loading")
-      gpu.setForeground(COLOR.info)
-      centerText(14, COLOR.info, "  Writing...", COLOR.background)
-      
-      local writeOk = writeFileToDisk(proxy, file.target, data)
-      
-      if writeOk then
-        succeeded = succeeded + 1
-      else
-        gpu.setForeground(COLOR.error)
-        centerText(16, COLOR.error, "Write failed", COLOR.background)
-        os.sleep(0.3)
-      end
-    else
-      gpu.setForeground(COLOR.error)
-      centerText(16, COLOR.error, "Download failed", COLOR.background)
-      os.sleep(0.3)
+
+    -- Drive info box
+    gpu.setBackground(T.surfaceAlt)
+    gpu.fill(CX+2, contentY+7, CW-4, 2, " ")
+    gpu.setForeground(T.accent)
+    gpu.set(CX+4, contentY+7, "[D] Drive: " .. disk.label)
+    gpu.setForeground(T.textSecondary)
+    gpu.set(CX+4, contentY+8, "    ("..disk.address:sub(1,8)..")")
+
+    gpu.setBackground(T.surface)
+    local btnInst = UI.drawButton(math.floor(W/2)-20, contentY+11, 18, 2, "Install Now", "accent")
+    local btnCncl = UI.drawButton(math.floor(W/2)+2,  contentY+11, 18, 2, "Cancel",      "secondary")
+
+    while true do
+        local ev,_,x,y = event.pull()
+        if ev=="touch" then
+            if UI.hitTest(btnInst,x,y) then return true  end
+            if UI.hitTest(btnCncl,x,y) then return false end
+        end
     end
-    
-    os.sleep(0.1)
-  end
-  
-  drawFluentProgressBar(15, 10, w - 30, 1.0, true)
-  
-  gpu.fill(10, 12, w - 20, 5, " ")
-  gpu.setBackground(COLOR.background)
-  
-  if succeeded >= total - 1 then
-    drawStatusIcon(math.floor(w/2) - 8, 14, "success")
-    gpu.setForeground(COLOR.success)
-    centerText(14, COLOR.success, "  Installation complete!", COLOR.background)
-  else
-    drawStatusIcon(math.floor(w/2) - 7, 14, "warning")
-    gpu.setForeground(COLOR.warning)
-    centerText(14, COLOR.warning, string.format("  %d/%d files installed", succeeded, total), COLOR.background)
-  end
-  
-  -- Boot config
-  local bootOk = pcall(computer.setBootAddress, disk.address)
-  if bootOk then
-    gpu.setForeground(COLOR.textSecondary)
-    centerText(16, COLOR.textSecondary, "Boot configured", COLOR.background)
-  end
-  
-  os.sleep(1.5)
-  return succeeded >= total - 1
 end
 
-local function finishScreen()
-  clearScreen()
-  
-  drawAcrylicCard(10, 5, w - 20, 17, "Setup Complete", true)
-  
-  gpu.setBackground(COLOR.background)
-  
-  -- Success icon
-  drawStatusIcon(math.floor(w/2) - 1, 9, "success")
-  
-  gpu.setForeground(COLOR.success)
-  centerText(9, COLOR.success, "  FixOS 3.1.1 installed successfully!", COLOR.background)
-  
-  gpu.setForeground(COLOR.textPrimary)
-  centerText(11, COLOR.textPrimary, "Your system is ready", COLOR.background)
-  
-  gpu.setForeground(COLOR.textSecondary)
-  centerText(13, COLOR.textSecondary, "• Drive labeled as FixOS", COLOR.background)
-  centerText(14, COLOR.textSecondary, "• Boot configuration set", COLOR.background)
-  centerText(15, COLOR.textSecondary, "• All files installed", COLOR.background)
-  
-  gpu.setBackground(COLOR.accentLightest)
-  gpu.fill(12, 17, w - 24, 1, " ")
-  gpu.setForeground(COLOR.accentPrimary)
-  centerText(17, COLOR.accentPrimary, "Enjoy the MAXIMUM WINDOWS 10 EDITION!", COLOR.accentLightest)
-  
-  gpu.setBackground(COLOR.background)
-  gpu.setForeground(COLOR.textTertiary)
-  
-  for i = 5, 1, -1 do
-    local countdown = string.format("Restarting in %d seconds...", i)
-    gpu.fill(10, 20, w - 20, 1, " ")
-    centerText(20, COLOR.textTertiary, countdown, COLOR.background)
-    os.sleep(1)
-  end
-  
-  computer.shutdown(true)
+local function screen_install(disk)
+    local proxy = component.proxy(disk.address)
+    local CX, CY, CW, CH = 8, 2, W-16, H-4
+    local spinFrame = 0
+
+    local function redraw(step, file, pct, status)
+        UI.clearScreen(W, H)
+        local y = drawCard(CX, CY, CW, CH, "Installing FixOS 3.1.2")
+
+        UI.centerText(CX, y, CW, step, T.accent, T.surface)
+        if file then
+            gpu.setBackground(T.surface)
+            gpu.setForeground(T.textSecondary)
+            UI.centerText(CX, y+1, CW, UI.truncate(file, CW-2), T.textSecondary, T.surface)
+        end
+
+        UI.drawProgressBar(CX+2, y+3, CW-4, pct)
+
+        spinFrame = spinFrame + 1
+        UI.spinner(math.floor(W/2), y+5, spinFrame, T.accent, T.surface)
+
+        if status then
+            gpu.setBackground(T.surface)
+            statusIcon(CX+2, y+7, status.kind)
+            gpu.setForeground(status.kind=="success" and T.success or
+                              status.kind=="warning"  and T.warning or T.info)
+            gpu.set(CX+7, y+7, status.msg)
+        end
+    end
+
+    -- Step 1: Format
+    redraw("Preparing drive...", disk.label, 0, nil)
+    local ok = formatDisk(disk.address)
+    if not ok then
+        redraw("Format failed", nil, 0, {kind="danger", msg="Cannot format"})
+        UI.drawButton(math.floor(W/2)-7, H-4, 14, 2, "Exit", "secondary")
+        event.pull("touch")
+        return false
+    end
+    redraw("Preparing drive...", disk.label, 0.33, {kind="success", msg="Drive formatted"})
+    os.sleep(0.4)
+
+    -- Step 2: Label
+    redraw("Configuring...", "Setting label to 'FixOS'", 0.5, nil)
+    pcall(proxy.setLabel, "FixOS")
+    redraw("Configuring...", "Setting label to 'FixOS'", 0.6, {kind="success", msg="Label set"})
+    os.sleep(0.4)
+
+    -- Step 3: Download
+    local total = #FILES; local done = 0
+    for _, f in ipairs(FILES) do
+        redraw("Downloading files...", f.path, 0.6 + (done/total)*0.4, {kind="loading", msg="Fetching..."})
+        local data = download(REPO.."/"..f.path, 3)
+        if data then
+            redraw("Downloading files...", f.path, 0.6 + (done/total)*0.4, {kind="loading", msg="Writing..."})
+            writeToDisk(proxy, f.target, data)
+            done = done + 1
+        end
+        os.sleep(0.05)
+    end
+
+    UI.drawProgressBar(CX+2, 2+4+3, CW-4, 1.0)
+    redraw("Downloading files...", nil, 1.0,
+        {kind = done >= total-1 and "success" or "warning",
+         msg  = done >= total-1 and "All files installed!" or
+                string.format("%d/%d files installed", done, total)})
+
+    pcall(computer.setBootAddress, disk.address)
+    os.sleep(1.5)
+    return done >= total - 1
 end
 
--- ====================
--- MAIN FLOW
--- ====================
+local function screen_finish()
+    UI.clearScreen(W, H)
+    local CX, CY, CW, CH = 10, 5, W-20, 17
+    local y = drawCard(CX, CY, CW, CH, "Setup Complete")
 
+    gpu.setBackground(T.surface)
+    statusIcon(math.floor(W/2)-2, y, "success")
+    UI.centerText(CX, y, CW, "    FixOS 3.1.2 installed!", T.success, T.surface)
+
+    local details = {"Drive labeled: FixOS", "Boot address: set", "UI Library: installed"}
+    for i, d in ipairs(details) do
+        gpu.setForeground(T.textSecondary)
+        gpu.set(CX+4, y+2+i, "- " .. d)
+    end
+
+    gpu.setBackground(T.accentSubtle)
+    gpu.fill(CX+2, y+7, CW-4, 1, " ")
+    UI.centerText(CX+2, y+7, CW-4, "Pixel-Perfect Edition!", T.accent, T.accentSubtle)
+
+    gpu.setBackground(T.surface)
+    for i = 5, 1, -1 do
+        local s = string.format("Restarting in %d...", i)
+        gpu.fill(CX+2, y+10, CW-4, 1, " ")
+        UI.centerText(CX+2, y+10, CW-4, s, T.textSecondary, T.surface)
+        os.sleep(1)
+    end
+    computer.shutdown(true)
+end
+
+-- ----------------------------------------------------------
+-- MAIN
+-- ----------------------------------------------------------
 local function main()
-  if not welcomeScreen() then
-    clearScreen()
-    centerText(h / 2, COLOR.textPrimary, "Setup cancelled")
-    os.sleep(1)
-    return
-  end
-  
-  local disk = selectDiskScreen()
-  if not disk then
-    clearScreen()
-    centerText(h / 2, COLOR.textPrimary, "Setup cancelled")
-    os.sleep(1)
-    return
-  end
-  
-  if not confirmScreen(disk) then
-    clearScreen()
-    centerText(h / 2, COLOR.textPrimary, "Setup cancelled")
-    os.sleep(1)
-    return
-  end
-  
-  if not installScreen(disk) then 
-    return 
-  end
-  
-  finishScreen()
-end
+    if not screen_welcome() then
+        UI.clearScreen(W, H)
+        cText(math.floor(H/2), "Setup cancelled.", T.textPrimary)
+        os.sleep(1)
+        return
+    end
 
--- ====================
--- ERROR HANDLING
--- ====================
+    local disk = screen_disk()
+    if not disk then
+        UI.clearScreen(W, H)
+        cText(math.floor(H/2), "Setup cancelled.", T.textPrimary)
+        os.sleep(1)
+        return
+    end
+
+    if not screen_confirm(disk) then
+        UI.clearScreen(W, H)
+        cText(math.floor(H/2), "Setup cancelled.", T.textPrimary)
+        os.sleep(1)
+        return
+    end
+
+    if screen_install(disk) then
+        screen_finish()
+    end
+end
 
 local ok, err = pcall(main)
 if not ok then
-  clearScreen()
-  
-  gpu.setBackground(COLOR.error)
-  gpu.setForeground(COLOR.textOnAccent)
-  gpu.fill(1, 1, w, h, " ")
-  
-  drawStatusIcon(math.floor(w/2) - 7, h/2 - 2, "error")
-  centerText(h/2 - 2, COLOR.textOnAccent, "  Setup Error", COLOR.error)
-  
-  local errMsg = tostring(err)
-  if #errMsg > w - 6 then
-    errMsg = errMsg:sub(1, w - 9) .. "..."
-  end
-  centerText(h/2, COLOR.textOnAccent, errMsg, COLOR.error)
-  
-  centerText(h/2 + 2, COLOR.textOnAccent, "Press any key to exit", COLOR.error)
-  
-  event.pull("key_down")
+    gpu.setBackground(T.danger)
+    gpu.setForeground(T.textOnAccent)
+    gpu.fill(1, 1, W, H, " ")
+    UI.centerText(1, math.floor(H/2)-1, W, "Setup Error", T.textOnAccent, T.danger)
+    UI.centerText(1, math.floor(H/2)+1, W, UI.truncate(tostring(err), W-4), T.textOnAccent, T.danger)
+    event.pull("key_down")
 end
