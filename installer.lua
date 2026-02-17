@@ -233,6 +233,17 @@ local function listDisks()
     return out
 end
 
+-- FIX: proxy.list() returns a TABLE in OC, not an iterator function.
+-- "for f in tbl do" crashes with "attempt to call a table value".
+-- Use the iterate() helper which handles both tables and functions.
+local function iterate(lf, fn)
+    if type(lf) == "function" then
+        for v in lf do fn(v) end
+    elseif type(lf) == "table" then
+        for _, v in ipairs(lf) do fn(v) end
+    end
+end
+
 local function formatDisk(addr)
     local proxy = component.proxy(addr)
     if not proxy then return false end
@@ -240,12 +251,20 @@ local function formatDisk(addr)
         local _, isD = pcall(proxy.isDirectory, path)
         if isD then
             local _, lf = pcall(function() return proxy.list(path) end)
-            if lf then for f in lf do rm(path..(path:match("/$") and "" or "/")..f) end end
+            if lf then
+                iterate(lf, function(f)
+                    rm(path .. (path:match("/$") and "" or "/") .. f)
+                end)
+            end
             pcall(proxy.remove, path)
-        else pcall(proxy.remove, path) end
+        else
+            pcall(proxy.remove, path)
+        end
     end
     local _, lf = pcall(function() return proxy.list("/") end)
-    if lf then for f in lf do rm("/"..f) end end
+    if lf then
+        iterate(lf, function(f) rm("/" .. f) end)
+    end
     return true
 end
 
