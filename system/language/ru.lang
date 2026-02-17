@@ -1,0 +1,74 @@
+# FixOS Russkij yazyk
+desktop.start = Pusk
+desktop.shutdown = Vyklyuchit
+desktop.user = Polzovatel FixOS
+desktop.apps = Programmy
+
+app.computer = Moj kompyuter
+app.explorer = Provodnik
+app.terminal = Terminal
+app.calculator = Kalkulyator
+app.notepad = Bloknot
+app.settings = Nastrojki
+app.programs = Programmy
+app.about = O sisteme
+app.update = Obnovleniye
+
+settings.system = Sistema
+settings.display = Displej
+settings.update = Obnovleniye
+settings.about = O sisteme
+settings.language = Yazyk
+
+settings.sys.info = Sistemnaya informaciya
+settings.sys.os = Operacionnaya sistema
+settings.sys.memory = Pamyat
+
+settings.upd.title = Obnovleniye sistemy
+settings.upd.info = Informaciya o versii
+settings.upd.installed = Ustanovleno
+settings.upd.status = Status
+settings.upd.check = Proverit obnovleniya
+settings.upd.checking = Proverka...
+settings.upd.up_to_date = Aktualnaya versiya
+settings.upd.available = Dostupno obnovleniye: v{1}
+settings.upd.no_internet = Net internet-karty
+settings.upd.failed = Oshibka soedineniya
+settings.upd.invalid = Nepravilnyj otvet
+
+settings.about.author = Avtor
+settings.about.platform = Platforma
+settings.about.year = God
+settings.about.ui = UI biblioteka
+
+settings.lang.title = Language / Mova / Yazyk
+settings.lang.current = Tekushchij yazyk
+
+explorer.name = Imya
+explorer.size = Razmer
+explorer.items = {1} elementov
+explorer.nofiles = Papka pusta
+
+terminal.welcome = Terminal FixOS v3.2.0
+terminal.help_hint = Vvedite 'help' dlya spiska komand
+terminal.unknown = '{1}' ne yavlyaetsya komandoj.
+
+installer.title = Ustanovka FixOS 3.2.0
+installer.welcome = Dobro pozhalovat v FixOS
+installer.edition = PIXEL PERFECT EDITION
+installer.drive = Vybor diska
+installer.select = Vyberte celevoj disk
+installer.warning = Vse dannye budut udaleny!
+installer.confirm = Podtverzhdenie ustanovki
+installer.installing = Ustanovka FixOS 3.2.0
+installer.done = FixOS 3.2.0 ustanovlena!
+installer.finish = Ustanovka zavershena
+installer.restart = Perezapusk cherez {1}...
+
+btn.next = Dalee ->
+btn.cancel = Otmena
+btn.back = <- Nazad
+btn.install = Ustanovit
+btn.exit = Vyjti
+btn.select = Vybrat etot disk
+btn.readonly = Tolko chtenie

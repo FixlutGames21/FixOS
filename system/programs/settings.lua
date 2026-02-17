@@ -1,14 +1,12 @@
 -- ==========================================================
--- FixOS 3.1.2 - system/programs/settings.lua
--- Uses UI library for all drawing.
--- FIXES:
---   - UI library is now cached on win object (not re-loaded every draw)
---   - Progress bar width now uses correct card's inner width
+-- FixOS 3.2.0 - system/programs/settings.lua
+-- FIXES 3.2.0:
+--   - Update: don't break on first nil (connection wait)
+--   - Language tab (5th tab)
 -- ==========================================================
 
 local settings = {}
 
--- Cache helper: loads UI once per window lifetime
 local function getUI(win, gpuProxy)
     if not win._ui then
         win._ui = dofile("/system/ui.lua")
@@ -17,14 +15,19 @@ local function getUI(win, gpuProxy)
     return win._ui
 end
 
+local function L(key, ...) return (_G.Lang and _G.Lang.t(key, ...)) or key end
+
 function settings.init(win)
     win.selectedTab  = 1
-    win.tabs         = {"System", "Display", "Update", "About"}
-    win.version      = "3.1.2"
-    win.updateStatus = "Ready"
+    win.tabs         = {
+        L("settings.system"), L("settings.display"),
+        L("settings.update"), L("settings.about"), L("settings.language"),
+    }
+    win.version      = "3.2.0"
+    win.updateStatus = L("settings.upd.check")
     win.updatePct    = 0
     win.elements     = {}
-    win._ui          = nil  -- will be populated on first draw
+    win._ui          = nil
 
     local fs = component.proxy(computer.getBootAddress())
     if fs.exists("/version.txt") then
@@ -49,160 +52,152 @@ function settings.init(win)
 end
 
 function settings.draw(win, gpu, cx, cy, cw, ch)
-    -- FIX: cache UI so it is not re-loaded on every frame
     local UI = getUI(win, gpu)
-    local T = UI.Theme
-    local P = UI.PADDING
+    local T  = UI.Theme
+    local P  = UI.PADDING
 
-    -- Clear area
     gpu.setBackground(T.surface)
     gpu.fill(cx, cy, cw, ch, " ")
-
     win.elements = {}
 
-    -- Tab bar
     local tabHits = UI.drawTabBar(cx, cy, cw, win.tabs, win.selectedTab)
     for _, h in ipairs(tabHits) do
-        h.action = "tab"
-        table.insert(win.elements, h)
+        h.action = "tab"; table.insert(win.elements, h)
     end
 
     local contentX = cx + P + 1
     local contentY = cy + 2
     local contentW = cw - (P + 1) * 2
 
-    -- --------------------------------------------------------
     if win.selectedTab == 1 then
         -- SYSTEM
+        gpu.setForeground(T.accent); gpu.setBackground(T.surface)
+        gpu.set(contentX, contentY, L("settings.sys.info")); contentY = contentY + 2
 
-        gpu.setForeground(T.accent)
-        gpu.setBackground(T.surface)
-        gpu.set(contentX, contentY, "System Information")
-        contentY = contentY + 2
-
-        -- OS card
-        local ix, iy, iw, ih = UI.drawCard(contentX, contentY, contentW, 5, "Operating System")
-        gpu.setForeground(T.textSecondary)
-        gpu.setBackground(T.surfaceAlt)
+        local ix, iy, iw = UI.drawCard(contentX, contentY, contentW, 5, L("settings.sys.os"))
+        gpu.setForeground(T.textSecondary); gpu.setBackground(T.surfaceAlt)
         gpu.set(ix, iy + 1, "Name:    FixOS")
-        gpu.set(ix, iy + 2, "Version: " .. win.version .. "  (Win10 Edition)")
+        gpu.set(ix, iy + 2, "Version: " .. win.version)
         contentY = contentY + 6
 
-        -- Memory card
         local total  = computer.totalMemory()
         local free   = computer.freeMemory()
         local used   = total - free
-        local memPct = used / total
-
-        -- FIX: capture all 4 return values from drawCard for the memory card
-        local mx, my, mw, mh = UI.drawCard(contentX, contentY, contentW, 5, "Memory")
-        gpu.setForeground(T.textSecondary)
-        gpu.setBackground(T.surfaceAlt)
-        gpu.set(mx, my + 1, string.format("Used: %d KB / Total: %d KB",
+        local pct    = used / total
+        local mx, my, mw = UI.drawCard(contentX, contentY, contentW, 5, L("settings.sys.memory"))
+        gpu.setForeground(T.textSecondary); gpu.setBackground(T.surfaceAlt)
+        gpu.set(mx, my + 1, string.format("Used: %dKB / Total: %dKB",
             math.floor(used/1024), math.floor(total/1024)))
+        UI.drawProgressBar(mx, my + 3, mw, pct, pct > 0.8 and T.danger or T.success)
 
-        local barColor = memPct > 0.8 and T.danger or T.success
-        -- FIX: use mw (memory card inner width), not iw (OS card inner width)
-        UI.drawProgressBar(mx, my + 3, mw, memPct, barColor)
-
-    -- --------------------------------------------------------
     elseif win.selectedTab == 2 then
         -- DISPLAY
+        gpu.setForeground(T.accent); gpu.setBackground(T.surface)
+        gpu.set(contentX, contentY, "Display Settings"); contentY = contentY + 2
 
-        gpu.setForeground(T.accent)
-        gpu.setBackground(T.surface)
-        gpu.set(contentX, contentY, "Display Settings")
-        contentY = contentY + 2
-
-        local rx, ry, rw = UI.drawCard(contentX, contentY, contentW, 3, "Current Resolution")
-        gpu.setForeground(T.textSecondary)
-        gpu.setBackground(T.surfaceAlt)
+        local rx, ry = UI.drawCard(contentX, contentY, contentW, 3, "Current Resolution")
+        gpu.setForeground(T.textSecondary); gpu.setBackground(T.surfaceAlt)
         gpu.set(rx, ry + 1, string.format("Active: %d x %d", win.currentW, win.currentH))
         contentY = contentY + 4
 
-        gpu.setForeground(T.textSecondary)
-        gpu.setBackground(T.surface)
-        gpu.set(contentX, contentY, "Click a resolution to apply and reboot:")
-        contentY = contentY + 1
+        gpu.setForeground(T.textSecondary); gpu.setBackground(T.surface)
+        gpu.set(contentX, contentY, "Click to apply and reboot:"); contentY = contentY + 1
 
         for _, res in ipairs(win.resolutions) do
             if res.w <= win.maxW and res.h <= win.maxH then
                 local isCur = (res.w == win.currentW and res.h == win.currentH)
                 local btn = UI.drawButton(contentX, contentY, contentW, 2,
                     res.name, isCur and "accent" or "secondary", true)
-                btn.action = "resolution"
-                btn.res    = res
-                table.insert(win.elements, btn)
-                contentY = contentY + 3
+                btn.action = "resolution"; btn.res = res
+                table.insert(win.elements, btn); contentY = contentY + 3
             end
         end
 
-    -- --------------------------------------------------------
     elseif win.selectedTab == 3 then
         -- UPDATE
+        gpu.setForeground(T.accent); gpu.setBackground(T.surface)
+        gpu.set(contentX, contentY, L("settings.upd.title")); contentY = contentY + 2
 
-        gpu.setForeground(T.accent)
-        gpu.setBackground(T.surface)
-        gpu.set(contentX, contentY, "System Update")
-        contentY = contentY + 2
-
-        local vx, vy, vw = UI.drawCard(contentX, contentY, contentW, 4, "Version Info")
-        gpu.setForeground(T.textSecondary)
-        gpu.setBackground(T.surfaceAlt)
-        gpu.set(vx, vy + 1, "Installed: FixOS " .. win.version)
-        gpu.set(vx, vy + 2, "Status:    " .. win.updateStatus)
+        local vx, vy, vw = UI.drawCard(contentX, contentY, contentW, 4, L("settings.upd.info"))
+        gpu.setForeground(T.textSecondary); gpu.setBackground(T.surfaceAlt)
+        gpu.set(vx, vy + 1, L("settings.upd.installed") .. ": FixOS " .. win.version)
+        gpu.set(vx, vy + 2, L("settings.upd.status") .. ":    " .. win.updateStatus)
         contentY = contentY + 5
 
         if win.updatePct > 0 then
-            UI.drawProgressBar(contentX, contentY, contentW, win.updatePct, T.success)
+            UI.drawProgressBar(contentX, contentY, contentW, win.updatePct,
+                win.updatePct >= 1.0 and T.success or T.accent)
             contentY = contentY + 2
         end
 
         local hasNet = component.isAvailable("internet")
-        local chkBtn = UI.drawButton(contentX, contentY, 24, 2,
-            "Check for Updates", "accent", hasNet)
-        chkBtn.action = "update"
-        table.insert(win.elements, chkBtn)
+        local chkBtn = UI.drawButton(contentX, contentY, 28, 2,
+            L("settings.upd.check"), "accent", hasNet)
+        chkBtn.action = "update"; table.insert(win.elements, chkBtn)
 
-    -- --------------------------------------------------------
+        if not hasNet then
+            contentY = contentY + 3
+            gpu.setForeground(T.danger); gpu.setBackground(T.surface)
+            gpu.set(contentX, contentY, "[!!] " .. L("settings.upd.no_internet"))
+        end
+
     elseif win.selectedTab == 4 then
         -- ABOUT
-
-        gpu.setForeground(T.accent)
-        gpu.setBackground(T.surface)
-        UI.centerText(contentX, contentY,     contentW, "FixOS " .. win.version, T.accent,         T.surface)
-        UI.centerText(contentX, contentY + 1, contentW, "Windows 10 Edition",    T.textSecondary, T.surface)
+        gpu.setForeground(T.accent); gpu.setBackground(T.surface)
+        UI.centerText(contentX, contentY,     contentW, "FixOS " .. win.version, T.accent,        T.surface)
+        UI.centerText(contentX, contentY + 1, contentW, "Windows 10 Edition",   T.textSecondary, T.surface)
         contentY = contentY + 3
-
-        UI.drawDivider(contentX, contentY, contentW)
-        contentY = contentY + 2
+        UI.drawDivider(contentX, contentY, contentW); contentY = contentY + 2
 
         local rows = {
-            {"Author",   "FixlutGames21"},
-            {"Platform", "OpenComputers (Minecraft)"},
-            {"Year",     "2026"},
-            {"UI Lib",   "ui.lua v3.1.2"},
+            {L("settings.about.author"),   "FixlutGames21"},
+            {L("settings.about.platform"), "OpenComputers (Minecraft)"},
+            {L("settings.about.year"),     "2026"},
+            {L("settings.about.ui"),       "ui.lua v3.2.0"},
         }
         for _, row in ipairs(rows) do
-            gpu.setForeground(T.textSecondary)
-            gpu.setBackground(T.surface)
+            gpu.setForeground(T.textSecondary); gpu.setBackground(T.surface)
             gpu.set(contentX, contentY, row[1])
             gpu.setForeground(T.textPrimary)
-            gpu.set(contentX + 12, contentY, row[2])
-            contentY = contentY + 1
+            gpu.set(contentX + 14, contentY, row[2]); contentY = contentY + 1
         end
+
+    elseif win.selectedTab == 5 then
+        -- LANGUAGE
+        gpu.setForeground(T.accent); gpu.setBackground(T.surface)
+        gpu.set(contentX, contentY, L("settings.lang.title")); contentY = contentY + 2
+
+        local curLang = (_G.Lang and _G.Lang.current()) or "en"
+        gpu.setForeground(T.textSecondary); gpu.setBackground(T.surface)
+        gpu.set(contentX, contentY, L("settings.lang.current") .. ": " .. curLang)
+        contentY = contentY + 2
+
+        local langs = {
+            {code="en", name="English"},
+            {code="uk", name="Ukrainska (Ukrainian)"},
+            {code="ru", name="Russkij (Russian)"},
+        }
+        for _, entry in ipairs(langs) do
+            local isCur = (curLang == entry.code)
+            local btn   = UI.drawButton(contentX, contentY, contentW, 2,
+                (isCur and "[*] " or "[ ] ") .. entry.name,
+                isCur and "accent" or "secondary", true)
+            btn.action   = "setlang"
+            btn.langCode = entry.code
+            table.insert(win.elements, btn); contentY = contentY + 3
+        end
+        contentY = contentY + 1
+        gpu.setForeground(T.textSecondary); gpu.setBackground(T.surface)
+        gpu.set(contentX, contentY, "* Reboot to apply fully")
     end
 end
 
 function settings.click(win, clickX, clickY, button)
-    -- FIX: use cached UI, not a fresh dofile() every click
     local UI = getUI(win)
-
     for _, elem in ipairs(win.elements) do
         if UI.hitTest(elem, clickX, clickY) then
             if elem.action == "tab" then
-                win.selectedTab = elem.index
-                return true
+                win.selectedTab = elem.index; return true
 
             elseif elem.action == "resolution" then
                 local gpu = component.proxy(component.list("gpu")())
@@ -210,14 +205,27 @@ function settings.click(win, clickX, clickY, button)
                 local fs = component.proxy(computer.getBootAddress())
                 local h  = fs.open("/settings.cfg", "w")
                 if h then
-                    fs.write(h, string.format("resolution=%dx%d\n", elem.res.w, elem.res.h))
+                    local lc = (_G.Lang and _G.Lang.current()) or "en"
+                    fs.write(h, string.format("resolution=%dx%d\nlanguage=%s\n",
+                        elem.res.w, elem.res.h, lc))
                     fs.close(h)
                 end
-                computer.shutdown(true)
-                return true
+                computer.shutdown(true); return true
 
             elseif elem.action == "update" then
-                settings.checkUpdates(win)
+                settings.checkUpdates(win); return true
+
+            elseif elem.action == "setlang" then
+                local fs = component.proxy(computer.getBootAddress())
+                local old = ""
+                if fs.exists("/settings.cfg") then
+                    local h = fs.open("/settings.cfg","r")
+                    if h then old = fs.read(h, math.huge); fs.close(h) end
+                end
+                local new = old:gsub("language=%a+\n?","") .. "language=" .. elem.langCode .. "\n"
+                local h = fs.open("/settings.cfg","w")
+                if h then fs.write(h, new); fs.close(h) end
+                if _G.Lang then _G.Lang.load(elem.langCode) end
                 return true
             end
         end
@@ -225,39 +233,48 @@ function settings.click(win, clickX, clickY, button)
     return false
 end
 
+-- FIX: correct download loop - wait for connection before giving up on nil
 function settings.checkUpdates(win)
     if not component.isAvailable("internet") then
-        win.updateStatus = "No Internet Card"
-        return
+        win.updateStatus = L("settings.upd.no_internet"); win.updatePct = 0; return
     end
-    win.updateStatus = "Checking..."
-    win.updatePct    = 0.4
+    win.updateStatus = L("settings.upd.checking"); win.updatePct = 0.2
 
     local net = component.internet
     local ok, handle = pcall(net.request,
         "https://raw.githubusercontent.com/FixlutGames21/FixOS/main/version.txt")
     if not ok or not handle then
-        win.updateStatus = "Connection failed"
-        win.updatePct    = 0
-        return
+        win.updateStatus = L("settings.upd.failed"); win.updatePct = 0; return
     end
 
-    local buf = {}; local t0 = computer.uptime() + 10
-    while computer.uptime() < t0 do
-        local c = handle.read(math.huge)
-        if c then table.insert(buf, c) else break end
-        os.sleep(0.05)
+    local buf      = {}
+    local deadline = computer.uptime() + 30
+    local gotData  = false
+
+    while computer.uptime() < deadline do
+        local chunk = handle.read(math.huge)
+        if chunk then
+            table.insert(buf, chunk)
+            gotData = true
+            win.updatePct = 0.7
+        elseif gotData then
+            break           -- EOF after data received
+        else
+            os.sleep(0.2)   -- Still connecting, wait
+        end
     end
     pcall(handle.close)
 
     local remote = table.concat(buf):match("[%d%.]+")
     if remote then
-        win.updatePct    = 1.0
-        win.updateStatus = remote == win.version and "Up to date" or
-                           "Update available: v" .. remote
+        win.updatePct = 1.0
+        if remote == win.version then
+            win.updateStatus = L("settings.upd.up_to_date")
+        else
+            win.updateStatus = L("settings.upd.available", remote)
+        end
     else
-        win.updateStatus = "Invalid response"
-        win.updatePct    = 0
+        win.updateStatus = L("settings.upd.invalid"); win.updatePct = 0
     end
 end
 

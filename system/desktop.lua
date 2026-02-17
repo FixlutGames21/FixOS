@@ -1,17 +1,14 @@
 -- ==========================================================
--- FixOS 3.1.2 - system/desktop.lua
--- FIXES:
---   - Shadow rendered only below/right (not over window body)
---   - centerText uses unicode.len() via UI library
---   - Start Menu tile colors use UI.Theme.tileDark / tileGray
---     instead of raw 0x2D2D30 which was invisible against menu bg
---   - PADDING constant from UI library used throughout
---   - Icon label centering fixed
+-- FixOS 3.2.0 - system/desktop.lua
+-- CHANGES 3.2.0:
+--   - Language system loaded (global _G.Lang)
+--   - Hotkeys S and X removed
+--   - Icon shadows removed (no doubling on blue BG)
+--   - Window shadow depth=1
+--   - Faster signal wait (0.02s)
 -- ==========================================================
 
-if not component.isAvailable("gpu") then
-    error("No GPU found")
-end
+if not component.isAvailable("gpu") then error("No GPU found") end
 
 local gpu    = component.proxy(component.list("gpu")())
 local screen = component.list("screen")()
@@ -26,112 +23,111 @@ local function showBoot()
     local bw = math.min(80, maxW)
     local bh = math.min(25, maxH)
     gpu.setResolution(bw, bh)
-
     gpu.setBackground(0x0078D7)
     gpu.fill(1, 1, bw, bh, " ")
-
     local logo = {
         "  ___ _       ___  ____  ",
         " | __(_)_ __ / _ \\/ ___| ",
         " | _|| \\ \\ // | | \\___ \\ ",
         " |_| |_/_\\_\\\\|_|_|/____/ ",
     }
-
     gpu.setForeground(0xFFFFFF)
     local ly = math.floor(bh / 2) - 4
     for i, line in ipairs(logo) do
         gpu.set(math.floor((bw - #line) / 2), ly + i - 1, line)
     end
-
     gpu.setForeground(0xCDE8FF)
-    local ed = "3.1.2 - PIXEL PERFECT EDITION"
+    local ed = "3.2.0 - PIXEL PERFECT EDITION"
     gpu.set(math.floor((bw - #ed) / 2), ly + #logo + 1, ed)
-
     local spinners = { "|", "/", "-", "\\", "|", "/", "-", "\\" }
     local sy = ly + #logo + 3
     local sx = math.floor(bw / 2) - 1
-    for f = 1, 24 do
+    for f = 1, 20 do
         gpu.setForeground(0xFFFFFF)
         gpu.setBackground(0x0078D7)
         gpu.set(sx, sy, spinners[(f % #spinners) + 1])
         computer.beep(180 + f * 12, 0.01)
         os.sleep(0.04)
     end
-    os.sleep(0.15)
+    os.sleep(0.1)
 end
-
 showBoot()
 
 -- ----------------------------------------------------------
 -- RESOLUTION
 -- ----------------------------------------------------------
-local function loadRes()
+local function loadCfg()
     local fs = component.proxy(computer.getBootAddress())
-    if fs.exists("/settings.cfg") then
-        local h = fs.open("/settings.cfg", "r")
-        if h then
-            local d = fs.read(h, math.huge); fs.close(h)
-            local w2, h2 = d:match("resolution=(%d+)x(%d+)")
-            if w2 and h2 then return tonumber(w2), tonumber(h2) end
-        end
-    end
-    return nil, nil
+    if not fs.exists("/settings.cfg") then return nil, nil, "en" end
+    local h = fs.open("/settings.cfg", "r")
+    if not h then return nil, nil, "en" end
+    local d = fs.read(h, math.huge); fs.close(h)
+    local w2, h2 = d:match("resolution=(%d+)x(%d+)")
+    local lang    = d:match("language=(%a+)") or "en"
+    return tonumber(w2), tonumber(h2), lang
 end
 
 do
-    local sw, sh = loadRes()
-    local mw, mh = gpu.maxResolution()
+    local sw, sh, _ = loadCfg()
+    local mw, mh    = gpu.maxResolution()
     gpu.setResolution(math.min(sw or 80, mw), math.min(sh or 25, mh))
 end
 
 local W, H = gpu.getResolution()
 
 -- ----------------------------------------------------------
--- LOAD UI LIBRARY
+-- LOAD UI + LANGUAGE
 -- ----------------------------------------------------------
-local UI = dofile("/system/ui.lua")
+local UI  = dofile("/system/ui.lua")
 UI.init(gpu)
 local T  = UI.Theme
 local P  = UI.PADDING
 
+-- Language (exposed globally so programs can use it)
+local Lang = dofile("/system/lang.lua")
+do
+    local _, _, cfgLang = loadCfg()
+    Lang.load(cfgLang or "en")
+end
+_G.Lang = Lang   -- global access for programs
+
 -- ----------------------------------------------------------
--- DESKTOP ICONS (tiles, strict 13x6 each)
+-- ICONS (no shadows on desktop tiles)
 -- ----------------------------------------------------------
 local ICON_W = 13
 local ICON_H = 6
 
 local ICONS = {
-    { x=3,  y=2,  label="Computer",   icon="[PC]", color=T.tileBlue,   prog="mycomputer" },
-    { x=3,  y=9,  label="Explorer",   icon="[F]",  color=T.tileOrange, prog="explorer"   },
-    { x=3,  y=16, label="Terminal",   icon="[>]",  color=T.tileDark,   prog="terminal"   },
-    { x=18, y=2,  label="Calculator", icon="[=]",  color=T.tileCyan,   prog="calculator" },
-    { x=18, y=9,  label="Notepad",    icon="[N]",  color=0x1565C0,     prog="notepad"    },
-    { x=18, y=16, label="Settings",   icon="[S]",  color=T.tileGray,   prog="settings"   },
+    { x=3,  y=2,  label=Lang.t("app.computer"),   icon="[PC]", color=T.tileBlue,   prog="mycomputer" },
+    { x=3,  y=9,  label=Lang.t("app.explorer"),   icon="[F]",  color=T.tileOrange, prog="explorer"   },
+    { x=3,  y=16, label=Lang.t("app.terminal"),   icon="[>]",  color=T.tileDark,   prog="terminal"   },
+    { x=18, y=2,  label=Lang.t("app.calculator"), icon="[=]",  color=T.tileCyan,   prog="calculator" },
+    { x=18, y=9,  label=Lang.t("app.notepad"),    icon="[N]",  color=0x1565C0,     prog="notepad"    },
+    { x=18, y=16, label=Lang.t("app.settings"),   icon="[S]",  color=T.tileGray,   prog="settings"   },
 }
 
--- window size presets
 local WIN_SIZES = {
     calculator = {45, 22},
     notepad    = {60, 22},
-    settings   = {62, 24},
+    settings   = {64, 24},
     mycomputer = {58, 20},
     terminal   = {66, 22},
-    explorer   = {62, 22},
+    explorer   = {64, 22},
 }
 
 -- ----------------------------------------------------------
 -- STATE
 -- ----------------------------------------------------------
 local state = {
-    running      = true,
-    windows      = {},
-    focused      = nil,   -- index into windows
-    drag         = nil,   -- window being dragged
-    dragOX       = 0,
-    dragOY       = 0,
-    startOpen    = false,
-    selIcon      = nil,
-    clockTick    = 0,
+    running   = true,
+    windows   = {},
+    focused   = nil,
+    drag      = nil,
+    dragOX    = 0,
+    dragOY    = 0,
+    startOpen = false,
+    selIcon   = nil,
+    clockTick = 0,
 }
 
 -- ----------------------------------------------------------
@@ -152,12 +148,11 @@ end
 
 local function safeCall(fn, ...)
     if type(fn) ~= "function" then return false, "not a function" end
-    local ok, r = pcall(fn, ...)
-    return ok, r
+    return pcall(fn, ...)
 end
 
 -- ----------------------------------------------------------
--- ICON DRAWING
+-- ICON DRAWING (no shadow - prevents doubling on blue BG)
 -- ----------------------------------------------------------
 local function drawIcon(icon, selected)
     local bg = icon.color
@@ -165,30 +160,23 @@ local function drawIcon(icon, selected)
         gpu.setBackground(T.accentSubtle)
         gpu.fill(icon.x - 1, icon.y - 1, ICON_W + 2, ICON_H + 2, " ")
     end
-    -- shadow (only below/right, outside the tile)
-    UI.shadow(icon.x, icon.y, ICON_W, ICON_H, 1)
 
-    -- tile body
     gpu.setBackground(bg)
     gpu.fill(icon.x, icon.y, ICON_W, ICON_H, " ")
 
-    -- left accent strip
-    local r = math.min(255, math.floor(bg/0x10000)+40)
-    local g = math.min(255, math.floor((bg%0x10000)/256)+40)
-    local b = math.min(255, bg%256+40)
-    gpu.setBackground(r*0x10000+g*0x100+b)
+    local r = math.min(255, math.floor(bg / 0x10000) + 40)
+    local g = math.min(255, math.floor((bg % 0x10000) / 256) + 40)
+    local b = math.min(255, bg % 256 + 40)
+    gpu.setBackground(r * 0x10000 + g * 0x100 + b)
     gpu.fill(icon.x, icon.y, 2, ICON_H, " ")
 
-    -- icon glyph (centered)
     gpu.setForeground(T.textOnAccent)
     gpu.setBackground(bg)
-    local gy = icon.y + math.floor(ICON_H / 2) - 1
-    -- icon centered in tile width
+    local gy   = icon.y + math.floor(ICON_H / 2) - 1
     local glen = #icon.icon
     local gx   = icon.x + math.floor((ICON_W - glen) / 2)
     gpu.set(gx, gy, icon.icon)
 
-    -- label (centered, using UI.centerText which uses unicode.len)
     UI.centerText(icon.x, icon.y + ICON_H - 1, ICON_W, icon.label, T.textOnAccent, bg)
 end
 
@@ -199,20 +187,19 @@ local function drawTaskbar()
     gpu.setBackground(T.chromeMid)
     gpu.fill(1, H, W, 1, " ")
 
-    -- Start button
-    local startBg = state.startOpen and T.accent or T.chromeMid
+    local startLabel = " " .. Lang.t("desktop.start") .. " "
+    local startBg    = state.startOpen and T.accent or T.chromeMid
     gpu.setBackground(startBg)
     gpu.setForeground(T.textOnAccent)
-    gpu.fill(1, H, 6, 1, " ")
-    gpu.set(2, H, " [+] ")
+    local startW = math.max(6, #startLabel + 2)
+    gpu.fill(1, H, startW, 1, " ")
+    gpu.set(2, H, startLabel)
 
-    -- Divider
     gpu.setForeground(T.chromeBorder)
     gpu.setBackground(T.chromeMid)
-    gpu.set(7, H, "\xE2\x94\x82")
+    gpu.set(startW + 1, H, "\xE2\x94\x82")
 
-    -- Window pills
-    local px = 9
+    local px = startW + 3
     for i, win in ipairs(state.windows) do
         if px + 15 < W - 9 then
             local isF = (state.focused == i)
@@ -229,7 +216,6 @@ local function drawTaskbar()
         end
     end
 
-    -- Clock
     local clk = os.date("%H:%M")
     gpu.setBackground(T.chromeMid)
     gpu.setForeground(T.textOnDark)
@@ -242,7 +228,6 @@ end
 -- DESKTOP
 -- ----------------------------------------------------------
 local function drawDesktop()
-    -- Blue gradient (3 alternating shades)
     for row = 1, H - 1 do
         local shade = 0x0078D7
         if row % 4 == 0 then shade = 0x006BB3
@@ -259,7 +244,6 @@ end
 -- WINDOW DRAWING
 -- ----------------------------------------------------------
 local function drawWindow(win, isFocused)
-    -- Use UI.drawWindow which has correct shadow + borders
     local cx, cy, cw, ch = UI.drawWindow(win.x, win.y, win.w, win.h, win.title, isFocused)
     win._cx, win._cy, win._cw, win._ch = cx, cy, cw, ch
 
@@ -277,48 +261,41 @@ end
 -- START MENU
 -- ----------------------------------------------------------
 local START_MENU_TILES = {
-    { label="Programs",  icon="[P]", color=T.tileBlue,   action="calculator" },
-    { label="Explorer",  icon="[F]", color=T.tileOrange, action="explorer"   },
-    { label="Terminal",  icon="[>]", color=T.tileDark,   action="terminal"   },
-    { label="Settings",  icon="[S]", color=T.tileGray,   action="settings"   },
-    { label="About",     icon="[i]", color=T.info,       action="about"      },
-    { label="Update",    icon="[U]", color=T.tileGreen,  action="update"     },
+    { label=Lang.t("app.programs"),  icon="[P]", color=T.tileBlue,   action="calculator" },
+    { label=Lang.t("app.explorer"),  icon="[F]", color=T.tileOrange, action="explorer"   },
+    { label=Lang.t("app.terminal"),  icon="[>]", color=T.tileDark,   action="terminal"   },
+    { label=Lang.t("app.settings"),  icon="[S]", color=T.tileGray,   action="settings"   },
+    { label=Lang.t("app.about"),     icon="[i]", color=T.info,       action="about"      },
+    { label=Lang.t("app.update"),    icon="[U]", color=T.tileGreen,  action="update"     },
 }
 
-local _menuHits   = {}   -- populated each time menu is drawn
-local MENU_W      = 2 + (UI.TILE_W + UI.TILE_GAP) * 2 - UI.TILE_GAP + 2
-local MENU_H      = 3 + (UI.TILE_H + UI.TILE_GAP) * 3 - UI.TILE_GAP + 4
+local _menuHits = {}
+local MENU_W    = 2 + (UI.TILE_W + UI.TILE_GAP) * 2 - UI.TILE_GAP + 2
+local MENU_H    = 3 + (UI.TILE_H + UI.TILE_GAP) * 3 - UI.TILE_GAP + 4
 
 local function drawStartMenu()
     local mx = 1
     local my = H - MENU_H - 1
 
-    -- Shadow
-    UI.shadow(mx, my, MENU_W, MENU_H, 2)
-
-    -- Background
+    -- No shadow (avoids doubling on colored bg)
     gpu.setBackground(T.chromeMid)
     gpu.fill(mx, my, MENU_W, MENU_H, " ")
 
-    -- User section
     gpu.setBackground(T.chromeDark)
     gpu.fill(mx, my, MENU_W, 2, " ")
     gpu.setForeground(T.textOnDark)
-    gpu.set(mx + 2, my + 1, "[U] FixOS User")
+    gpu.set(mx + 2, my + 1, "[U] " .. Lang.t("desktop.user"))
 
-    -- "Apps" label
     gpu.setBackground(T.chromeMid)
     gpu.setForeground(T.textSecondary)
-    gpu.set(mx + 2, my + 3, "Apps")
+    gpu.set(mx + 2, my + 3, Lang.t("desktop.apps"))
 
-    -- Tile grid
     _menuHits = UI.drawStartMenuGrid(mx + 2, my + 4, START_MENU_TILES)
 
-    -- Power button (full width, at bottom)
     local powerY = my + MENU_H - 2
     gpu.setBackground(T.danger)
     gpu.fill(mx, powerY, MENU_W, 2, " ")
-    UI.centerText(mx, powerY + 1, MENU_W, "[X] Shut Down", T.textOnAccent, T.danger)
+    UI.centerText(mx, powerY + 1, MENU_W, "[X] " .. Lang.t("desktop.shutdown"), T.textOnAccent, T.danger)
     table.insert(_menuHits, { x=mx, y=powerY, w=MENU_W, h=2, action="shutdown" })
 end
 
@@ -338,11 +315,11 @@ end
 -- WINDOW MANAGEMENT
 -- ----------------------------------------------------------
 local function createWindow(prog)
-    local sz     = WIN_SIZES[prog] or {52, 20}
-    local ow     = sz[1]; local oh = sz[2]
-    local off    = #state.windows * 2
-    local wx     = math.min(math.floor((W - ow) / 2) + off, W - ow)
-    local wy     = math.max(1, math.min(math.floor((H - oh) / 2) + off, H - 1 - oh))
+    local sz  = WIN_SIZES[prog] or {52, 20}
+    local ow  = sz[1]; local oh = sz[2]
+    local off = #state.windows * 2
+    local wx  = math.min(math.floor((W - ow) / 2) + off, W - ow)
+    local wy  = math.max(1, math.min(math.floor((H - oh) / 2) + off, H - 1 - oh))
     local module, err = loadProgram(prog)
     if not module then return end
 
@@ -394,8 +371,8 @@ local function handleMenuAction(action)
     state.startOpen = false
     if action == "shutdown" then
         gpu.setBackground(T.accent)
-        gpu.fill(1,1,W,H," ")
-        UI.centerText(1, math.floor(H/2), W, "Shutting down...", T.textOnAccent, T.accent)
+        gpu.fill(1, 1, W, H, " ")
+        UI.centerText(1, math.floor(H/2), W, Lang.t("desktop.shutdown") .. "...", T.textOnAccent, T.accent)
         os.sleep(0.5)
         computer.shutdown()
     elseif action == "about" then
@@ -415,11 +392,11 @@ local function handleMenuAction(action)
 end
 
 -- ----------------------------------------------------------
--- CLOCK  (only redraws the clock cell, not full screen)
+-- CLOCK TICK (partial redraw, fast)
 -- ----------------------------------------------------------
 local function tickClock()
     local now = computer.uptime()
-    if now - state.clockTick < 30 then return end
+    if now - state.clockTick < 28 then return end
     state.clockTick = now
     local clk = os.date("%H:%M")
     gpu.setBackground(T.chromeMid)
@@ -428,13 +405,13 @@ local function tickClock()
 end
 
 -- ----------------------------------------------------------
--- MAIN LOOP
+-- MAIN LOOP (no hotkeys, 0.02s timeout for fast response)
 -- ----------------------------------------------------------
 local function main()
     redrawAll()
 
     while state.running do
-        local ev = { computer.pullSignal(0.03) }
+        local ev = { computer.pullSignal(0.02) }
         local t  = ev[1]
         tickClock()
 
@@ -442,7 +419,6 @@ local function main()
             local _, _, mx, my, btn = table.unpack(ev)
 
             if state.startOpen then
-                -- Check menu hits first
                 local hit = false
                 for _, h in ipairs(_menuHits) do
                     if UI.hitTest(h, mx, my) then
@@ -456,8 +432,7 @@ local function main()
                     redrawAll()
                 end
 
-            elseif my == H and mx >= 1 and mx <= 6 then
-                -- Start button
+            elseif my == H and mx >= 1 and mx <= 8 then
                 state.startOpen = not state.startOpen
                 redrawAll()
 
@@ -468,17 +443,14 @@ local function main()
                     win = state.windows[state.focused]
 
                     if my == win.y and mx >= win.x + win.w - 3 then
-                        -- Close button
                         closeTop()
                         redrawAll()
                     elseif my == win.y then
-                        -- Start drag
                         state.drag  = win
                         state.dragOX = mx - win.x
                         state.dragOY = my - win.y
                         redrawAll()
                     else
-                        -- Content click
                         local ok, nr = safeCall(win.program and win.program.click, win, mx, my, btn)
                         if nr then redrawAll() end
                     end
@@ -521,13 +493,9 @@ local function main()
             end
 
         elseif t == "key_down" then
+            -- Hotkeys removed (S, X were removed per user request)
             local _, _, char, code = table.unpack(ev)
-            if code == 31 then           -- S key = start menu
-                state.startOpen = not state.startOpen
-                redrawAll()
-            elseif code == 45 then       -- X key = shutdown
-                handleMenuAction("shutdown")
-            elseif state.focused and state.windows[state.focused] then
+            if state.focused and state.windows[state.focused] then
                 local win = state.windows[state.focused]
                 local ok, nr = safeCall(win.program and win.program.key, win, char, code)
                 if nr then redrawAll() end

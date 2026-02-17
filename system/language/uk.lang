@@ -1,0 +1,74 @@
+# FixOS Украiнська мова
+desktop.start = Пуск
+desktop.shutdown = Вимкнути
+desktop.user = Користувач FixOS
+desktop.apps = Програми
+
+app.computer = Комп'ютер
+app.explorer = Провiдник
+app.terminal = Термiнал
+app.calculator = Калькулятор
+app.notepad = Блокнот
+app.settings = Налаштування
+app.programs = Програми
+app.about = Про систему
+app.update = Оновлення
+
+settings.system = Система
+settings.display = Дисплей
+settings.update = Оновлення
+settings.about = Про
+settings.language = Мова
+
+settings.sys.info = Системна iнформацiя
+settings.sys.os = Операцiйна система
+settings.sys.memory = Пам'ять
+
+settings.upd.title = Оновлення системи
+settings.upd.info = Iнформацiя про версiю
+settings.upd.installed = Встановлено
+settings.upd.status = Статус
+settings.upd.check = Перевiрити оновлення
+settings.upd.checking = Перевiрка...
+settings.upd.up_to_date = Актуальна версiя
+settings.upd.available = Доступно оновлення: v{1}
+settings.upd.no_internet = Немає iнтернет-карти
+settings.upd.failed = Помилка з'єднання
+settings.upd.invalid = Невiдповiдь сервера
+
+settings.about.author = Автор
+settings.about.platform = Платформа
+settings.about.year = Рiк
+settings.about.ui = UI бiблiотека
+
+settings.lang.title = Language / Мова / Язык
+settings.lang.current = Поточна мова
+
+explorer.name = Назва
+explorer.size = Розмiр
+explorer.items = {1} елементiв
+explorer.nofiles = Папка порожня
+
+terminal.welcome = Термiнал FixOS v3.2.0
+terminal.help_hint = Введiть 'help' для списку команд
+terminal.unknown = '{1}' не є командою.
+
+installer.title = Встановлення FixOS 3.2.0
+installer.welcome = Ласкаво просимо до FixOS
+installer.edition = PIXEL PERFECT EDITION
+installer.drive = Вибiр диска
+installer.select = Оберiть цiльовий диск
+installer.warning = Всi данi будуть видаленi!
+installer.confirm = Пiдтвердження встановлення
+installer.installing = Встановлення FixOS 3.2.0
+installer.done = FixOS 3.2.0 встановлено!
+installer.finish = Встановлення завершено
+installer.restart = Перезапуск через {1}...
+
+btn.next = Далi ->
+btn.cancel = Скасувати
+btn.back = <- Назад
+btn.install = Встановити
+btn.exit = Вийти
+btn.select = Обрати цей диск
+btn.readonly = Тiльки читання

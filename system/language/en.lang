@@ -1,0 +1,74 @@
+# FixOS English Language Pack
+desktop.start = Start
+desktop.shutdown = Shut Down
+desktop.user = FixOS User
+desktop.apps = Apps
+
+app.computer = Computer
+app.explorer = Explorer
+app.terminal = Terminal
+app.calculator = Calculator
+app.notepad = Notepad
+app.settings = Settings
+app.programs = Programs
+app.about = About
+app.update = Update
+
+settings.system = System
+settings.display = Display
+settings.update = Update
+settings.about = About
+settings.language = Language
+
+settings.sys.info = System Information
+settings.sys.os = Operating System
+settings.sys.memory = Memory
+
+settings.upd.title = System Update
+settings.upd.info = Version Info
+settings.upd.installed = Installed
+settings.upd.status = Status
+settings.upd.check = Check for Updates
+settings.upd.checking = Checking...
+settings.upd.up_to_date = Up to date
+settings.upd.available = Update available: v{1}
+settings.upd.no_internet = No Internet Card
+settings.upd.failed = Connection failed
+settings.upd.invalid = Invalid response
+
+settings.about.author = Author
+settings.about.platform = Platform
+settings.about.year = Year
+settings.about.ui = UI Library
+
+settings.lang.title = Language / Мова / Язык
+settings.lang.current = Current language
+
+explorer.name = Name
+explorer.size = Size
+explorer.items = {1} items
+explorer.nofiles = Empty folder
+
+terminal.welcome = FixOS Terminal v3.2.0
+terminal.help_hint = Type 'help' for commands
+terminal.unknown = '{1}' is not a recognized command.
+
+installer.title = FixOS 3.2.0 Setup
+installer.welcome = Welcome to FixOS Setup
+installer.edition = PIXEL PERFECT EDITION
+installer.drive = Choose Installation Drive
+installer.select = Select target drive
+installer.warning = All data will be erased!
+installer.confirm = Confirm Installation
+installer.installing = Installing FixOS 3.2.0
+installer.done = FixOS 3.2.0 installed!
+installer.finish = Setup Complete
+installer.restart = Restarting in {1}...
+
+btn.next = Next ->
+btn.cancel = Cancel
+btn.back = <- Back
+btn.install = Install Now
+btn.exit = Exit
+btn.select = Select this drive
+btn.readonly = Read-Only
