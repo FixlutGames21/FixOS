@@ -64,18 +64,18 @@ end
 bootPrint("Creating component API...")
 
 local component_api = {}
-component_api.list = component.list
-component_api.type = component.type
-component_api.slot = component.slot
+component_api.list    = component.list
+component_api.type    = component.type
+component_api.slot    = component.slot
 component_api.methods = component.methods
-component_api.invoke = component.invoke
-component_api.doc = component.doc
+component_api.invoke  = component.invoke
+component_api.doc     = component.doc
 
 function component_api.proxy(address)
-  local type = component.type(address)
-  if not type then return nil, "no such component" end
+  local t = component.type(address)
+  if not t then return nil, "no such component" end
   
-  local proxy = {address = address, type = type}
+  local proxy = {address = address, type = t}
   for method in pairs(component.methods(address)) do
     proxy[method] = function(...)
       return component.invoke(address, method, ...)
@@ -85,10 +85,21 @@ function component_api.proxy(address)
   return proxy
 end
 
+-- FIX: proper partial-address matching
 function component_api.get(address, componentType)
-  local type = component.type(address)
-  if type == componentType or address:sub(1, #address) == address then
-    return address
+  -- exact match first
+  local t = component.type(address)
+  if t then
+    if componentType == nil or t == componentType then
+      return address
+    end
+    return nil, "component type mismatch"
+  end
+  -- partial match (short UUID prefix)
+  for addr in component.list(componentType or "") do
+    if addr:sub(1, #address) == address then
+      return addr
+    end
   end
   return nil, "no such component"
 end
@@ -179,6 +190,7 @@ _G.require = function(name)
 end
 
 if not _G.os then _G.os = {} end
+
 _G.os.sleep = function(seconds)
   local deadline = computer.uptime() + (seconds or 0)
   repeat
@@ -186,14 +198,29 @@ _G.os.sleep = function(seconds)
   until computer.uptime() >= deadline
 end
 
+-- FIX: support %H:%M, %H:%M:%S and fallback
 _G.os.date = function(format, time)
   time = time or os.time()
-  if format == "%H:%M" then
-    local hours = math.floor((time / 3600) % 24)
-    local minutes = math.floor((time / 60) % 60)
-    return string.format("%02d:%02d", hours, minutes)
+  local hours   = math.floor((time / 3600) % 24)
+  local minutes = math.floor((time / 60)   % 60)
+  local seconds = math.floor(time          % 60)
+
+  if format == "*t" then
+    return { hour = hours, min = minutes, sec = seconds,
+             year = 2000, month = 1, day = 1,
+             wday = 1, yday = 1, isdst = false }
   end
-  return tostring(time)
+
+  -- Replace tokens manually so any combination works
+  local result = tostring(format)
+  result = result:gsub("%%H",  string.format("%02d", hours))
+  result = result:gsub("%%M",  string.format("%02d", minutes))
+  result = result:gsub("%%S",  string.format("%02d", seconds))
+  -- If no tokens were replaced (unknown format) fall back to timestamp
+  if result == tostring(format) and not format:find("%%[HMS]") then
+    result = tostring(time)
+  end
+  return result
 end
 
 _G.os.time = function()

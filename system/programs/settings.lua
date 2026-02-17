@@ -1,11 +1,21 @@
 -- ==========================================================
 -- FixOS 3.1.2 - system/programs/settings.lua
 -- Uses UI library for all drawing.
--- FIXES: tab centering, card headers, progress bar,
---        button centering all via UI lib (unicode.len inside).
+-- FIXES:
+--   - UI library is now cached on win object (not re-loaded every draw)
+--   - Progress bar width now uses correct card's inner width
 -- ==========================================================
 
 local settings = {}
+
+-- Cache helper: loads UI once per window lifetime
+local function getUI(win, gpuProxy)
+    if not win._ui then
+        win._ui = dofile("/system/ui.lua")
+        win._ui.init(gpuProxy or component.proxy(component.list("gpu")()))
+    end
+    return win._ui
+end
 
 function settings.init(win)
     win.selectedTab  = 1
@@ -14,6 +24,7 @@ function settings.init(win)
     win.updateStatus = "Ready"
     win.updatePct    = 0
     win.elements     = {}
+    win._ui          = nil  -- will be populated on first draw
 
     local fs = component.proxy(computer.getBootAddress())
     if fs.exists("/version.txt") then
@@ -38,9 +49,8 @@ function settings.init(win)
 end
 
 function settings.draw(win, gpu, cx, cy, cw, ch)
-    -- Load UI lib (cached by Lua's module system after first load)
-    local UI = dofile("/system/ui.lua")
-    UI.init(gpu)
+    -- FIX: cache UI so it is not re-loaded on every frame
+    local UI = getUI(win, gpu)
     local T = UI.Theme
     local P = UI.PADDING
 
@@ -50,14 +60,13 @@ function settings.draw(win, gpu, cx, cy, cw, ch)
 
     win.elements = {}
 
-    -- Tab bar (fills full content width, equal tabs)
+    -- Tab bar
     local tabHits = UI.drawTabBar(cx, cy, cw, win.tabs, win.selectedTab)
     for _, h in ipairs(tabHits) do
         h.action = "tab"
         table.insert(win.elements, h)
     end
 
-    -- Content starts 2 rows below tabs
     local contentX = cx + P + 1
     local contentY = cy + 2
     local contentW = cw - (P + 1) * 2
@@ -80,19 +89,21 @@ function settings.draw(win, gpu, cx, cy, cw, ch)
         contentY = contentY + 6
 
         -- Memory card
-        local total   = computer.totalMemory()
-        local free    = computer.freeMemory()
-        local used    = total - free
-        local memPct  = used / total
+        local total  = computer.totalMemory()
+        local free   = computer.freeMemory()
+        local used   = total - free
+        local memPct = used / total
 
-        local mx, my = UI.drawCard(contentX, contentY, contentW, 5, "Memory")
+        -- FIX: capture all 4 return values from drawCard for the memory card
+        local mx, my, mw, mh = UI.drawCard(contentX, contentY, contentW, 5, "Memory")
         gpu.setForeground(T.textSecondary)
         gpu.setBackground(T.surfaceAlt)
         gpu.set(mx, my + 1, string.format("Used: %d KB / Total: %d KB",
             math.floor(used/1024), math.floor(total/1024)))
 
         local barColor = memPct > 0.8 and T.danger or T.success
-        UI.drawProgressBar(mx, my + 3, iw, memPct, barColor)
+        -- FIX: use mw (memory card inner width), not iw (OS card inner width)
+        UI.drawProgressBar(mx, my + 3, mw, memPct, barColor)
 
     -- --------------------------------------------------------
     elseif win.selectedTab == 2 then
@@ -184,8 +195,8 @@ function settings.draw(win, gpu, cx, cy, cw, ch)
 end
 
 function settings.click(win, clickX, clickY, button)
-    local UI = dofile("/system/ui.lua")
-    UI.init(component.proxy(component.list("gpu")()))
+    -- FIX: use cached UI, not a fresh dofile() every click
+    local UI = getUI(win)
 
     for _, elem in ipairs(win.elements) do
         if UI.hitTest(elem, clickX, clickY) then

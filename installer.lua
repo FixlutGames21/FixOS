@@ -6,6 +6,7 @@
 --   - Button centering from UI.drawButton
 --   - Progress bar from UI.drawProgressBar
 --   - PADDING from UI.PADDING
+--   - FIX: inline stub now includes spinner() and accentSubtle
 -- ==========================================================
 
 local component  = require("component")
@@ -31,6 +32,8 @@ if not UI_ok then
     UI.PADDING = 1
     UI.Theme   = {
         accent=0x0078D7, accentDark=0x005A9E, accentLight=0x429CE3,
+        -- FIX: accentSubtle was missing → crash in screen_finish
+        accentSubtle=0xCDE8FF,
         surface=0xFFFFFF, surfaceAlt=0xF3F3F3, surfaceInset=0xE8E8E8,
         chromeDark=0x1F1F1F, chromeMid=0x2D2D30, chromeLight=0xF0F0F0,
         textPrimary=0x1B1B1B, textSecondary=0x666666, textDisabled=0xAAAAAA,
@@ -103,6 +106,13 @@ if not UI_ok then
         gpu.setBackground(onB and barColor       or T.progressTrack)
         gpu.set(lx, y, pct)
     end
+    -- FIX: spinner was missing from stub → crash in screen_install
+    function UI.spinner(x, y, frame, color, bg)
+        local frames = { "|", "/", "-", "\\", "|", "/", "-", "\\" }
+        gpu.setForeground(color or UI.Theme.accent)
+        gpu.setBackground(bg    or UI.Theme.surface)
+        gpu.set(x, y, frames[(frame % #frames) + 1])
+    end
     function UI.hitTest(r, mx, my)
         return mx>=r.x and mx<r.x+r.w and my>=r.y and my<r.y+r.h
     end
@@ -136,24 +146,19 @@ local REPO = "https://raw.githubusercontent.com/FixlutGames21/FixOS/main"
 
 -- ----------------------------------------------------------
 -- CARD HELPER
--- Draws a floating card (accent title bar + white body + shadow).
--- Returns y of first usable content row inside the card.
 -- ----------------------------------------------------------
 local function drawCard(cx, cy, cw, ch, title)
     UI.shadow(cx, cy, cw, ch, 2)
 
-    -- Body
     gpu.setBackground(T.surface)
     gpu.fill(cx, cy, cw, ch, " ")
 
-    -- Accent header (3 rows)
     gpu.setBackground(T.accent)
     gpu.fill(cx, cy, cw, 3, " ")
     if title then
         UI.centerText(cx, cy + 1, cw, title, T.textOnAccent, T.accent)
     end
 
-    -- Subtle border
     gpu.setForeground(T.borderSubtle)
     gpu.setBackground(T.surface)
     for col = 0, cw - 1 do
@@ -166,10 +171,9 @@ local function drawCard(cx, cy, cw, ch, title)
     gpu.set(cx,        cy + ch - 1, "\xE2\x94\x94")
     gpu.set(cx + cw-1, cy + ch - 1, "\xE2\x94\x98")
 
-    return cy + 4   -- first content row inside card
+    return cy + 4
 end
 
--- Status icon (no emoji; pure ASCII)
 local function statusIcon(x, y, kind)
     local map = { success="[OK]", warning="[!!]", danger="[XX]",
                   info="[i] ", loading="[~] " }
@@ -180,7 +184,6 @@ local function statusIcon(x, y, kind)
     gpu.set(x, y, map[kind] or "[?] ")
 end
 
--- Centre helpers that use UI.centerText
 local function cText(y, str, fg, bg)
     UI.centerText(1, y, W, str, fg, bg or T.surface)
 end
@@ -291,13 +294,12 @@ local function screen_welcome()
     end
 
     if not internet then
-        gpu.setBackground(T.danger)
-        gpu.fill(CX+2, H-6, CW-4, 1, " ")
-        UI.centerText(CX+2, H-6, CW-4, "[!!] Internet Card required!", T.textOnAccent, T.danger)
+        gpu.setBackground(T.danger); gpu.fill(CX+2, H-6, CW-4, 1, " ")
+        UI.centerText(CX+2, H-6, CW-4, "Internet Card required!", T.textOnAccent, T.danger)
         local btn = UI.drawButton(math.floor(W/2)-7, H-4, 14, 2, "Exit", "secondary")
         while true do
-            local ev, _, x, y = event.pull()
-            if ev == "touch" and UI.hitTest(btn, x, y) then return false end
+            local ev,_,x,y = event.pull()
+            if ev=="touch" and UI.hitTest(btn,x,y) then return false end
         end
     end
 
@@ -324,7 +326,6 @@ local function screen_disk()
     gpu.setBackground(T.surface)
     UI.centerText(CX, contentY, CW, "Select the drive for FixOS 3.1.2", T.textPrimary, T.surface)
 
-    -- Warning banner
     gpu.setBackground(T.warning)
     gpu.fill(CX+2, contentY+2, CW-4, 1, " ")
     UI.centerText(CX+2, contentY+2, CW-4, "[!!] All data will be erased!", T.textOnAccent, T.warning)
@@ -334,7 +335,7 @@ local function screen_disk()
 
     if #disks == 0 then
         UI.centerText(CX, contentY+4, CW, "No suitable drives found", T.danger, T.surface)
-        local b = UI.drawButton(math.floor(W/2)-7, H-4, 14, 2, "<- Back", "secondary")
+        UI.drawButton(math.floor(W/2)-7, H-4, 14, 2, "<- Back", "secondary")
         event.pull("touch")
         return nil
     end
@@ -343,7 +344,6 @@ local function screen_disk()
     local dy = contentY + 4
     for _, disk in ipairs(disks) do
         if dy + 4 < H - 6 then
-            -- mini card per disk
             gpu.setBackground(T.surfaceAlt)
             gpu.fill(CX+2, dy, CW-4, 3, " ")
             gpu.setForeground(T.accent)
@@ -394,7 +394,6 @@ local function screen_confirm(disk)
         gpu.set(CX+4, contentY+2+i, "- " .. s)
     end
 
-    -- Drive info box
     gpu.setBackground(T.surfaceAlt)
     gpu.fill(CX+2, contentY+7, CW-4, 2, " ")
     gpu.setForeground(T.accent)
@@ -502,6 +501,7 @@ local function screen_finish()
         gpu.set(CX+4, y+2+i, "- " .. d)
     end
 
+    -- FIX: T.accentSubtle used here; now present in stub Theme
     gpu.setBackground(T.accentSubtle)
     gpu.fill(CX+2, y+7, CW-4, 1, " ")
     UI.centerText(CX+2, y+7, CW-4, "Pixel-Perfect Edition!", T.accent, T.accentSubtle)
