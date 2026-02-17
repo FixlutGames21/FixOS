@@ -115,6 +115,7 @@ local FILES = {
     { path="system/programs/mycomputer.lua",        target="/system/programs/mycomputer.lua"    },
     { path="system/programs/terminal.lua",          target="/system/programs/terminal.lua"      },
     { path="system/programs/explorer.lua",          target="/system/programs/explorer.lua"      },
+    { path="system/programs/browser.lua",          target="/system/programs/browser.lua"      },
     { path="version.txt",                           target="/version.txt"                       },
 }
 
