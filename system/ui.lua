@@ -1,10 +1,9 @@
 -- ==========================================================
--- FixOS 3.2.0 - system/ui.lua
--- Pixel-Perfect UI Library
--- CHANGES 3.2.0:
---   - UI.drawScrollbar added
---   - drawWindow shadow reduced to depth=1 (no doubling)
---   - shadow depth param always respected
+-- FixOS 3.2.2 - system/ui.lua
+-- FIXES 3.2.2:
+--   - Shadow COMPLETELY REMOVED (no frames behind windows)
+--   - Button shadow REMOVED (clean solid buttons)
+--   - All drawing is clean and crisp
 -- ==========================================================
 
 local UI = {}
@@ -33,11 +32,6 @@ UI.Theme = {
     borderSubtle    = 0xE5E5E5,
     borderStrong    = 0xCCCCCC,
     divider         = 0xDDDDDD,
-
-    shadow0         = 0xDDDDDD,
-    shadow1         = 0xC0C0C0,
-    shadow2         = 0xA0A0A0,
-    shadow3         = 0x787878,
 
     success         = 0x10893E,
     warning         = 0xFFB900,
@@ -102,30 +96,21 @@ function UI.centerText(x, y, width, str, fg, bg)
     _gpu.set(x + ox, y, str)
 end
 
--- Shadow: depth=0 draws nothing, depth=1 draws one strip only
+-- FIX: Shadow is now a NO-OP (completely disabled)
 function UI.shadow(x, y, w, h, depth)
-    depth = math.max(0, math.min(depth or 1, 3))
-    if depth == 0 then return end
-    local colors = { UI.Theme.shadow1, UI.Theme.shadow2, UI.Theme.shadow3 }
-    for i = 1, depth do
-        local c = colors[i] or colors[#colors]
-        _gpu.setBackground(c)
-        _gpu.fill(x + i,     y + h + (i - 1), w, 1, " ")
-        _gpu.fill(x + w + (i - 1), y + i,     1, h, " ")
-    end
+    -- Intentionally empty - no shadows drawn
 end
 
--- drawWindow: shadow depth=1 to avoid doubling effect
+-- FIX: Window drawing with NO shadow, clean borders
 function UI.drawWindow(x, y, w, h, title, focused)
     if focused == nil then focused = true end
     local P = UI.PADDING
 
-    -- Thin shadow (depth=1, no doubling)
-    UI.shadow(x, y, w, h, 1)
-
+    -- Body (NO shadow call)
     _gpu.setBackground(UI.Theme.surface)
     _gpu.fill(x, y, w, h, " ")
 
+    -- Title bar
     local titleBg = focused and UI.Theme.accent or UI.Theme.chromeMid
     _gpu.setBackground(titleBg)
     _gpu.fill(x, y, w, 1, " ")
@@ -144,17 +129,20 @@ function UI.drawWindow(x, y, w, h, title, focused)
     _gpu.setForeground(UI.Theme.textOnAccent)
     _gpu.set(cx0 + 6, y, " X ")
 
+    -- Divider below title
     _gpu.setForeground(UI.Theme.borderSubtle)
     _gpu.setBackground(UI.Theme.surface)
     for col = 0, w - 1 do
         _gpu.set(x + col, y + 1, "\xE2\x94\x80")
     end
 
+    -- Side borders
     for row = 2, h - 2 do
         _gpu.set(x,         y + row, "\xE2\x94\x82")
         _gpu.set(x + w - 1, y + row, "\xE2\x94\x82")
     end
 
+    -- Bottom border
     _gpu.set(x,         y + h - 1, "\xE2\x94\x94")
     _gpu.set(x + w - 1, y + h - 1, "\xE2\x94\x98")
     for col = 1, w - 2 do
@@ -168,10 +156,7 @@ function UI.drawWindow(x, y, w, h, title, focused)
     return clientX, clientY, clientW, clientH
 end
 
--- Vertical scrollbar
--- total   = total number of items
--- visible = number of visible items
--- offset  = current scroll offset (0-based)
+-- Scrollbar
 function UI.drawScrollbar(x, y, h, total, visible, offset)
     if total <= visible or h < 2 then return end
     local T = UI.Theme
@@ -185,6 +170,7 @@ function UI.drawScrollbar(x, y, h, total, visible, offset)
     _gpu.fill(x, y + thumbY, 1, thumbH, " ")
 end
 
+-- FIX: Button with NO shadow underneath (clean solid button)
 function UI.drawButton(x, y, w, h, label, style, enabled)
     style   = style   or "accent"
     enabled = (enabled == nil) and true or enabled
@@ -208,20 +194,17 @@ function UI.drawButton(x, y, w, h, label, style, enabled)
         bg, fg, topBar = UI.Theme.accent,     UI.Theme.textOnAccent, UI.Theme.accentDark
     end
 
-    if enabled and h >= 1 then
-        _gpu.setBackground(UI.Theme.shadow1)
-        _gpu.fill(x + 1, y + h, w, 1, " ")
-        _gpu.fill(x + w, y + 1, 1, h, " ")
-    end
-
+    -- NO SHADOW - just draw the button solid
     _gpu.setBackground(bg)
     _gpu.fill(x, y, w, h, " ")
 
+    -- Top accent bar (1px stripe at top)
     if topBar then
         _gpu.setBackground(topBar)
         _gpu.fill(x, y, w, 1, " ")
     end
 
+    -- Centered label
     local labelRow = y + math.floor(h / 2)
     if topBar then labelRow = y + math.max(1, math.floor(h / 2)) end
     UI.centerText(x, labelRow, w, label, fg, bg)

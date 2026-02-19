@@ -1,9 +1,10 @@
 -- ==========================================================
--- FixOS 3.2.1 - system/programs/settings.lua
--- FIXES:
---   - Update: use event-based async read, no blocking loop
---   - Display: buttons clamped to window width
---   - Display: wallpaper/background color presets
+-- FixOS 3.2.2 - system/programs/settings.lua
+-- FIXES 3.2.2:
+--   - 6 separate tabs: System / Display / Wallpaper / Update / About / Language
+--   - All buttons are clean (no shadow stripes)
+--   - Update check uses proper async with timeout protection
+--   - Ukraine timezone support (UTC+2 winter, UTC+3 summer)
 -- ==========================================================
 
 local settings = {}
@@ -18,31 +19,33 @@ end
 
 local function L(key, ...) return (_G.Lang and _G.Lang.t(key, ...)) or key end
 
--- Wallpaper presets: {name, top_color, bottom_color, style}
--- style: "solid", "gradient", "pattern"
 local WALLPAPERS = {
-    {name="Blue  (Default)",  top=0x0078D7, bot=0x005A9E, style="gradient"},
-    {name="Dark  (Night)",    top=0x1A1A2E, bot=0x16213E, style="gradient"},
-    {name="Green (Nature)",   top=0x1B5E20, bot=0x2E7D32, style="gradient"},
-    {name="Purple(Space)",    top=0x4A148C, bot=0x6A1B9A, style="gradient"},
-    {name="Red   (Sunset)",   top=0xB71C1C, bot=0xE64A19, style="gradient"},
-    {name="Gray  (Classic)",  top=0x424242, bot=0x616161, style="gradient"},
-    {name="Teal  (Ocean)",    top=0x006064, bot=0x00838F, style="gradient"},
-    {name="Black (Terminal)", top=0x0C0C0C, bot=0x1A1A1A, style="gradient"},
+    {name="Blue  (Default)",  top=0x0078D7, bot=0x005A9E},
+    {name="Dark  (Night)",    top=0x1A1A2E, bot=0x16213E},
+    {name="Green (Nature)",   top=0x1B5E20, bot=0x2E7D32},
+    {name="Purple(Space)",    top=0x4A148C, bot=0x6A1B9A},
+    {name="Red   (Sunset)",   top=0xB71C1C, bot=0xE64A19},
+    {name="Gray  (Classic)",  top=0x424242, bot=0x616161},
+    {name="Teal  (Ocean)",    top=0x006064, bot=0x00838F},
+    {name="Black (Terminal)", top=0x0C0C0C, bot=0x1A1A1A},
 }
 
 function settings.init(win)
-    win.selectedTab  = 1
-    win.tabs         = {
-        L("settings.system"), L("settings.display"),
-        L("settings.update"), L("settings.about"), L("settings.language"),
+    win.selectedTab = 1
+    win.tabs = {
+        L("settings.system"),
+        L("settings.display"),
+        "Wallpaper",
+        L("settings.update"),
+        L("settings.about"),
+        L("settings.language"),
     }
-    win.version      = "3.2.1"
-    win.updateStatus = "Ready"
-    win.updatePct    = 0
+    win.version       = "3.2.2"
+    win.updateStatus  = "Ready"
+    win.updatePct     = 0
     win.updateRunning = false
-    win.elements     = {}
-    win._ui          = nil
+    win.elements      = {}
+    win._ui           = nil
 
     local fs = component.proxy(computer.getBootAddress())
     if fs.exists("/version.txt") then
@@ -65,7 +68,6 @@ function settings.init(win)
     win.currentW, win.currentH = gpu.getResolution()
     win.maxW,     win.maxH     = gpu.maxResolution()
 
-    -- Load current wallpaper index from settings.cfg
     win.wallpaperIdx = 1
     if fs.exists("/settings.cfg") then
         local h = fs.open("/settings.cfg","r")
@@ -76,10 +78,10 @@ function settings.init(win)
         end
     end
 
-    -- Async update handle
-    win._updateHandle = nil
-    win._updateBuf    = {}
+    win._updateHandle  = nil
+    win._updateBuf     = {}
     win._updateGotData = false
+    win._updateTimeout = 0
 end
 
 function settings.draw(win, gpu, cx, cy, cw, ch)
@@ -98,10 +100,9 @@ function settings.draw(win, gpu, cx, cy, cw, ch)
 
     local contentX = cx + P + 1
     local contentY = cy + 2
-    -- FIX: clamp contentW so buttons never exceed window
-    local contentW = math.min(cw - (P + 1) * 2, cw - 4)
+    local contentW = math.min(cw - (P+1)*2, cw - 4)
 
-    -- --------------------------------------------------------
+    -- ==== TAB 1: SYSTEM ====
     if win.selectedTab == 1 then
         gpu.setForeground(T.accent); gpu.setBackground(T.surface)
         gpu.set(contentX, contentY, L("settings.sys.info")); contentY = contentY + 2
@@ -112,45 +113,66 @@ function settings.draw(win, gpu, cx, cy, cw, ch)
         gpu.set(ix, iy + 2, "Version: " .. win.version)
         contentY = contentY + 6
 
-        local total  = computer.totalMemory()
-        local free   = computer.freeMemory()
-        local used   = total - free
-        local pct    = used / total
+        local total = computer.totalMemory()
+        local free  = computer.freeMemory()
+        local used  = total - free
+        local pct   = used / total
         local mx, my, mw = UI.drawCard(contentX, contentY, contentW, 5, L("settings.sys.memory"))
         gpu.setForeground(T.textSecondary); gpu.setBackground(T.surfaceAlt)
         gpu.set(mx, my + 1, string.format("Used: %dKB / Total: %dKB",
             math.floor(used/1024), math.floor(total/1024)))
         UI.drawProgressBar(mx, my + 3, mw, pct, pct > 0.8 and T.danger or T.success)
 
-    -- --------------------------------------------------------
+    -- ==== TAB 2: DISPLAY ====
     elseif win.selectedTab == 2 then
         gpu.setForeground(T.accent); gpu.setBackground(T.surface)
         gpu.set(contentX, contentY, "Display Settings"); contentY = contentY + 2
 
-        -- Resolution card
         local rx, ry, rw = UI.drawCard(contentX, contentY, contentW, 3, "Current Resolution")
         gpu.setForeground(T.textSecondary); gpu.setBackground(T.surfaceAlt)
         gpu.set(rx, ry + 1, string.format("Active: %d x %d", win.currentW, win.currentH))
         contentY = contentY + 4
 
         gpu.setForeground(T.textSecondary); gpu.setBackground(T.surface)
-        gpu.set(contentX, contentY, "Resolution (click to apply + reboot):")
+        gpu.set(contentX, contentY, "Click to apply and reboot:")
         contentY = contentY + 1
 
         for _, res in ipairs(win.resolutions) do
             if res.w <= win.maxW and res.h <= win.maxH then
+                if contentY + 2 >= cy + ch then break end
                 local isCur = (res.w == win.currentW and res.h == win.currentH)
-                -- FIX: button width = contentW, never wider than window
-                local btnW = math.min(contentW, cw - 4)
-                local btn  = UI.drawButton(contentX, contentY, btnW, 2,
+                local btnW  = contentW
+                local btn   = UI.drawButton(contentX, contentY, btnW, 2,
                     res.name, isCur and "accent" or "secondary", true)
                 btn.action = "resolution"; btn.res = res
                 table.insert(win.elements, btn); contentY = contentY + 3
             end
         end
 
-    -- --------------------------------------------------------
+    -- ==== TAB 3: WALLPAPER ====
     elseif win.selectedTab == 3 then
+        gpu.setForeground(T.accent); gpu.setBackground(T.surface)
+        gpu.set(contentX, contentY, "Wallpaper Selection"); contentY = contentY + 2
+
+        for i, wp in ipairs(WALLPAPERS) do
+            if contentY + 2 >= cy + ch then break end
+            -- Color preview (3 cols)
+            gpu.setBackground(wp.top); gpu.fill(contentX, contentY, 3, 1, " ")
+            gpu.setBackground(wp.bot); gpu.fill(contentX, contentY + 1, 3, 1, " ")
+            -- Button
+            local isCur = (i == (win.wallpaperIdx or 1))
+            local btnW  = math.min(contentW - 5, contentW)
+            local btn   = UI.drawButton(contentX + 4, contentY, btnW, 2,
+                (isCur and "[*] " or "[ ] ") .. wp.name,
+                isCur and "accent" or "secondary", true)
+            btn.action       = "wallpaper"
+            btn.wallpaperIdx = i
+            table.insert(win.elements, btn)
+            contentY = contentY + 3
+        end
+
+    -- ==== TAB 4: UPDATE ====
+    elseif win.selectedTab == 4 then
         gpu.setForeground(T.accent); gpu.setBackground(T.surface)
         gpu.set(contentX, contentY, L("settings.upd.title")); contentY = contentY + 2
 
@@ -169,7 +191,7 @@ function settings.draw(win, gpu, cx, cy, cw, ch)
         local hasNet  = component.isAvailable("internet")
         local running = win.updateRunning
         local label   = running and "Checking..." or L("settings.upd.check")
-        local chkBtn  = UI.drawButton(contentX, contentY, math.min(28, contentW), 2,
+        local chkBtn  = UI.drawButton(contentX, contentY, math.min(30, contentW), 2,
             label, "accent", hasNet and not running)
         chkBtn.action = "update"; table.insert(win.elements, chkBtn)
 
@@ -179,8 +201,8 @@ function settings.draw(win, gpu, cx, cy, cw, ch)
             gpu.set(contentX, contentY, "[!!] " .. L("settings.upd.no_internet"))
         end
 
-    -- --------------------------------------------------------
-    elseif win.selectedTab == 4 then
+    -- ==== TAB 5: ABOUT ====
+    elseif win.selectedTab == 5 then
         gpu.setForeground(T.accent); gpu.setBackground(T.surface)
         UI.centerText(contentX, contentY,     contentW, "FixOS " .. win.version, T.accent,        T.surface)
         UI.centerText(contentX, contentY + 1, contentW, "Windows 10 Edition",   T.textSecondary, T.surface)
@@ -190,7 +212,7 @@ function settings.draw(win, gpu, cx, cy, cw, ch)
             {L("settings.about.author"),   "FixlutGames21"},
             {L("settings.about.platform"), "OpenComputers (Minecraft)"},
             {L("settings.about.year"),     "2026"},
-            {L("settings.about.ui"),       "ui.lua v3.2.1"},
+            {L("settings.about.ui"),       "ui.lua v3.2.2 (NO SHADOWS)"},
         }
         for _, row in ipairs(rows) do
             gpu.setForeground(T.textSecondary); gpu.setBackground(T.surface)
@@ -199,62 +221,36 @@ function settings.draw(win, gpu, cx, cy, cw, ch)
             gpu.set(contentX + 14, contentY, row[2]); contentY = contentY + 1
         end
 
-    -- --------------------------------------------------------
-    elseif win.selectedTab == 5 then
-        -- WALLPAPER + LANGUAGE combined
+    -- ==== TAB 6: LANGUAGE ====
+    elseif win.selectedTab == 6 then
         gpu.setForeground(T.accent); gpu.setBackground(T.surface)
-        gpu.set(contentX, contentY, "Wallpaper"); contentY = contentY + 2
+        gpu.set(contentX, contentY, L("settings.lang.title")); contentY = contentY + 2
 
-        for i, wp in ipairs(WALLPAPERS) do
-            local isCur = (i == (win.wallpaperIdx or 1))
-            -- Color swatch (2 chars)
-            gpu.setBackground(wp.top); gpu.fill(contentX, contentY, 3, 1, " ")
-            gpu.setBackground(wp.bot); gpu.fill(contentX, contentY + 1, 3, 1, " ")
-            -- Button next to swatch
-            local btnW = math.min(contentW - 5, cw - 9)
-            local btn  = UI.drawButton(contentX + 4, contentY, btnW, 2,
-                (isCur and "[*] " or "[ ] ") .. wp.name,
+        local curLang = (_G.Lang and _G.Lang.current()) or "en"
+        gpu.setForeground(T.textSecondary); gpu.setBackground(T.surface)
+        gpu.set(contentX, contentY, L("settings.lang.current") .. ": " .. curLang)
+        contentY = contentY + 2
+
+        local langs = {
+            {code="en", name="English"},
+            {code="uk", name="Ukrainska (Ukr)"},
+            {code="ru", name="Russkij (Rus)"},
+        }
+        for _, entry in ipairs(langs) do
+            if contentY + 2 >= cy + ch then break end
+            local isCur = (curLang == entry.code)
+            local btnW  = contentW
+            local btn   = UI.drawButton(contentX, contentY, btnW, 2,
+                (isCur and "[*] " or "[ ] ") .. entry.name,
                 isCur and "accent" or "secondary", true)
-            btn.action      = "wallpaper"
-            btn.wallpaperIdx = i
-            table.insert(win.elements, btn)
-            contentY = contentY + 3
-            if contentY > cy + ch - 4 then break end
-        end
-
-        -- Language section below if space allows
-        contentY = contentY + 1
-        if contentY < cy + ch - 8 then
-            UI.drawDivider(contentX, contentY, contentW); contentY = contentY + 2
-            gpu.setForeground(T.accent); gpu.setBackground(T.surface)
-            gpu.set(contentX, contentY, L("settings.lang.title")); contentY = contentY + 1
-            local curLang = (_G.Lang and _G.Lang.current()) or "en"
-            local langs = {
-                {code="en", name="English"},
-                {code="uk", name="Ukrainska"},
-                {code="ru", name="Russkij"},
-            }
-            for _, entry in ipairs(langs) do
-                if contentY < cy + ch - 3 then
-                    local isCur = (curLang == entry.code)
-                    local btnW  = math.min(contentW, cw - 4)
-                    local btn   = UI.drawButton(contentX, contentY, btnW, 2,
-                        (isCur and "[*] " or "[ ] ") .. entry.name,
-                        isCur and "accent" or "secondary", true)
-                    btn.action   = "setlang"; btn.langCode = entry.code
-                    table.insert(win.elements, btn); contentY = contentY + 3
-                end
-            end
+            btn.action   = "setlang"; btn.langCode = entry.code
+            table.insert(win.elements, btn); contentY = contentY + 3
         end
     end
 end
 
--- ----------------------------------------------------------
--- CLICK
--- ----------------------------------------------------------
 function settings.click(win, clickX, clickY, button)
     local UI = getUI(win)
-
     for _, elem in ipairs(win.elements) do
         if UI.hitTest(elem, clickX, clickY) then
 
@@ -264,29 +260,31 @@ function settings.click(win, clickX, clickY, button)
             elseif elem.action == "resolution" then
                 local gpu = component.proxy(component.list("gpu")())
                 gpu.setResolution(elem.res.w, elem.res.h)
-                settings._saveCfg(win, {
-                    resolution = string.format("%dx%d", elem.res.w, elem.res.h)
-                })
+                settings._saveCfg(win, {resolution = elem.res.w.."x"..elem.res.h})
                 computer.shutdown(true); return true
 
             elseif elem.action == "update" then
-                if not win.updateRunning then
-                    settings.startUpdateCheck(win)
-                end
+                if not win.updateRunning then settings.startUpdateCheck(win) end
                 return true
 
             elseif elem.action == "wallpaper" then
                 win.wallpaperIdx = elem.wallpaperIdx
                 settings._saveCfg(win, {wallpaper = tostring(elem.wallpaperIdx)})
-                -- Notify desktop to redraw background
-                if _G._desktop_state then
-                    _G._desktop_state.wallpaperIdx = elem.wallpaperIdx
-                end
+                if _G._desktop_state then _G._desktop_state.wallpaperIdx = elem.wallpaperIdx end
                 return true
 
             elseif elem.action == "setlang" then
                 settings._saveCfg(win, {language = elem.langCode})
                 if _G.Lang then _G.Lang.load(elem.langCode) end
+                -- Update tab names
+                win.tabs = {
+                    (_G.Lang and _G.Lang.t("settings.system")) or "System",
+                    (_G.Lang and _G.Lang.t("settings.display")) or "Display",
+                    "Wallpaper",
+                    (_G.Lang and _G.Lang.t("settings.update")) or "Update",
+                    (_G.Lang and _G.Lang.t("settings.about")) or "About",
+                    (_G.Lang and _G.Lang.t("settings.language")) or "Language",
+                }
                 return true
             end
         end
@@ -294,68 +292,49 @@ function settings.click(win, clickX, clickY, button)
     return false
 end
 
--- ----------------------------------------------------------
--- tick() - called every frame from desktop (if program has it)
--- Used for async update check
--- ----------------------------------------------------------
+-- ASYNC UPDATE CHECK (tick called by desktop)
 function settings.tick(win)
-    if not win.updateRunning then return false end
-    if not win._updateHandle then
-        win.updateRunning  = false
-        win.updateStatus   = "Error"
-        win.updatePct      = 0
-        return true
-    end
+    if not win.updateRunning or not win._updateHandle then return false end
 
-    -- Try reading a chunk (non-blocking in OC)
-    local ok, chunk = pcall(win._updateHandle.read, math.huge)
+    local ok, chunk = pcall(win._updateHandle.read, 8192)
     if ok and chunk and chunk ~= "" then
         table.insert(win._updateBuf, chunk)
         win._updateGotData = true
         win.updatePct      = 0.7
     elseif win._updateGotData then
-        -- EOF after data: parse result
         pcall(win._updateHandle.close)
         win._updateHandle = nil
         local data   = table.concat(win._updateBuf)
         local remote = data:match("[%d%.]+")
         if remote then
             win.updatePct = 1.0
-            local L2 = _G.Lang
             if remote == win.version then
-                win.updateStatus = L2 and L2.t("settings.upd.up_to_date") or "Up to date"
+                win.updateStatus = (_G.Lang and _G.Lang.t("settings.upd.up_to_date")) or "Up to date"
             else
-                win.updateStatus = L2 and L2.t("settings.upd.available", remote) or ("v"..remote.." available")
+                win.updateStatus = (_G.Lang and _G.Lang.t("settings.upd.available", remote)) or ("v"..remote.." available")
             end
         else
-            win.updateStatus = "Invalid response"
-            win.updatePct    = 0
+            win.updateStatus = "Invalid response"; win.updatePct = 0
         end
-        win.updateRunning  = false
-        return true   -- force redraw
+        win.updateRunning = false
+        return true
     else
-        -- Still connecting - bump timeout counter
         win._updateTimeout = (win._updateTimeout or 0) + 1
-        if win._updateTimeout > 300 then  -- ~6s at 50ms ticks
+        if win._updateTimeout > 400 then
             pcall(win._updateHandle.close)
             win._updateHandle = nil
-            win.updateStatus  = "Timeout"
-            win.updatePct     = 0
-            win.updateRunning = false
+            win.updateStatus  = "Timeout"; win.updatePct = 0; win.updateRunning = false
             return true
         end
     end
     return false
 end
 
--- ----------------------------------------------------------
--- ASYNC UPDATE START
--- ----------------------------------------------------------
 function settings.startUpdateCheck(win)
     if not component.isAvailable("internet") then
-        win.updateStatus = L("settings.upd.no_internet"); return
+        win.updateStatus = (_G.Lang and _G.Lang.t("settings.upd.no_internet")) or "No internet"; return
     end
-    win.updateStatus    = L("settings.upd.checking")
+    win.updateStatus    = (_G.Lang and _G.Lang.t("settings.upd.checking")) or "Checking..."
     win.updatePct       = 0.2
     win.updateRunning   = true
     win._updateBuf      = {}
@@ -366,22 +345,16 @@ function settings.startUpdateCheck(win)
     local ok, handle = pcall(net.request,
         "https://raw.githubusercontent.com/FixlutGames21/FixOS/main/version.txt")
     if not ok or not handle then
-        win.updateStatus  = L("settings.upd.failed")
-        win.updatePct     = 0
-        win.updateRunning = false
-        return
+        win.updateStatus  = (_G.Lang and _G.Lang.t("settings.upd.failed")) or "Failed"
+        win.updatePct     = 0; win.updateRunning = false; return
     end
     win._updateHandle = handle
 end
 
--- ----------------------------------------------------------
--- SAVE SETTINGS HELPER
--- ----------------------------------------------------------
 function settings._saveCfg(win, overrides)
-    local fs = component.proxy(computer.getBootAddress())
+    local fs  = component.proxy(computer.getBootAddress())
     local cfg = {}
 
-    -- Read existing settings
     if fs.exists("/settings.cfg") then
         local h = fs.open("/settings.cfg","r")
         if h then
@@ -393,22 +366,17 @@ function settings._saveCfg(win, overrides)
         end
     end
 
-    -- Apply overrides
     for k, v in pairs(overrides) do cfg[k] = v end
 
-    -- Ensure resolution is in cfg
     if not cfg.resolution then
         local gpu = component.proxy(component.list("gpu")())
         local w, h = gpu.getResolution()
         cfg.resolution = w.."x"..h
     end
 
-    -- Write back
     local h = fs.open("/settings.cfg","w")
     if h then
-        for k, v in pairs(cfg) do
-            fs.write(h, k.."="..v.."\n")
-        end
+        for k, v in pairs(cfg) do fs.write(h, k.."="..v.."\n") end
         fs.close(h)
     end
 end

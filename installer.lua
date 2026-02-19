@@ -1,10 +1,10 @@
 -- ==========================================================
--- FixOS 3.2.0 - installer.lua
--- FIXES 3.2.0:
---   - Download loop: don't break on first nil (connect wait)
---   - No shadow in card helper (no doubling on screen)
---   - Language files included in FILES list
---   - Bigger clearer buttons
+-- FixOS 3.2.2 - installer.lua
+-- FIXES 3.2.2:
+--   - NO shadows anywhere (clean UI)
+--   - Clean solid buttons (no stripes)
+--   - Updated file list (includes browser, updated versions)
+--   - Better download loop with proper timeout
 -- ==========================================================
 
 local component = require("component")
@@ -20,7 +20,7 @@ local W, H = gpu.maxResolution()
 gpu.setResolution(math.min(80, W), math.min(25, H))
 W, H = gpu.getResolution()
 
--- Load UI if available, else inline stub
+-- Load UI or inline stub
 local UI_ok, UI = pcall(dofile, "/system/ui.lua")
 if not UI_ok then
     UI = {}
@@ -33,7 +33,6 @@ if not UI_ok then
         textPrimary=0x1B1B1B, textSecondary=0x666666, textDisabled=0xAAAAAA,
         textOnAccent=0xFFFFFF, textOnDark=0xF3F3F3,
         borderSubtle=0xE5E5E5, divider=0xDDDDDD,
-        shadow1=0xC0C0C0,
         success=0x10893E, warning=0xFFB900, danger=0xE81123, info=0x0078D7,
         progressTrack=0xE0E0E0,
     }
@@ -52,7 +51,7 @@ if not UI_ok then
         gpu.setForeground(fg)
         gpu.set(x + ox, y, str)
     end
-    function UI.shadow(x,y,w,h,d) end   -- no-op: prevents doubling
+    function UI.shadow(x,y,w,h,d) end
     function UI.drawButton(x, y, w, h, label, style, enabled)
         style   = style or "accent"
         enabled = (enabled == nil) and true or enabled
@@ -61,9 +60,6 @@ if not UI_ok then
         local bg = enabled and (style=="danger" and T.danger or style=="success" and T.success
                                or style=="secondary" and T.surfaceAlt or T.accent) or T.surfaceInset
         local fg = (style=="secondary" and enabled) and T.textPrimary or T.textOnAccent
-        if enabled then
-            gpu.setBackground(T.shadow1); gpu.fill(x+1,y+h,w,1," ")
-        end
         gpu.setBackground(bg); gpu.fill(x, y, w, h, " ")
         UI.centerText(x, y + math.floor(h/2), w, label, fg, bg)
         return {x=x, y=y, w=w, h=h}
@@ -98,9 +94,7 @@ UI.init(gpu)
 local T = UI.Theme
 local P = UI.PADDING
 
--- ----------------------------------------------------------
--- FILES TO DOWNLOAD
--- ----------------------------------------------------------
+-- FILES TO DOWNLOAD (updated with 3.2.2 versions)
 local FILES = {
     { path="boot/init.lua",                         target="/init.lua"                          },
     { path="system/ui.lua",                         target="/system/ui.lua"                     },
@@ -115,17 +109,14 @@ local FILES = {
     { path="system/programs/mycomputer.lua",        target="/system/programs/mycomputer.lua"    },
     { path="system/programs/terminal.lua",          target="/system/programs/terminal.lua"      },
     { path="system/programs/explorer.lua",          target="/system/programs/explorer.lua"      },
-    { path="system/programs/browser.lua",          target="/system/programs/browser.lua"      },
+    { path="system/programs/browser.lua",           target="/system/programs/browser.lua"       },
     { path="version.txt",                           target="/version.txt"                       },
 }
 
 local REPO = "https://raw.githubusercontent.com/FixlutGames21/FixOS/main"
 
--- ----------------------------------------------------------
--- CARD HELPER (no shadow - avoids doubling on background)
--- ----------------------------------------------------------
+-- Card helper (NO SHADOW)
 local function drawCard(cx, cy, cw, ch, title)
-    -- No shadow call here (shadow removed to fix doubling effect)
     gpu.setBackground(T.surface)
     gpu.fill(cx, cy, cw, ch, " ")
 
@@ -161,9 +152,7 @@ local function cText(y, str, fg, bg)
     UI.centerText(1, y, W, str, fg, bg or T.surface)
 end
 
--- ----------------------------------------------------------
--- NETWORK (FIXED: don't break on first nil)
--- ----------------------------------------------------------
+-- DOWNLOAD with proper timeout
 local function download(url, retries)
     if not internet then return nil, "No Internet Card" end
     retries = retries or 3
@@ -171,18 +160,18 @@ local function download(url, retries)
         local ok, h = pcall(internet.request, url)
         if ok and h then
             local buf      = {}
-            local deadline = computer.uptime() + 60
+            local deadline = computer.uptime() + 30
             local gotData  = false
 
             while computer.uptime() < deadline do
-                local c = h.read(math.huge)
+                local c = h.read(8192)
                 if c then
                     table.insert(buf, c)
                     gotData = true
                 elseif gotData then
-                    break        -- EOF after data
+                    break
                 else
-                    os.sleep(0.2)  -- Still connecting
+                    os.sleep(0.2)
                 end
             end
             pcall(h.close)
@@ -197,9 +186,7 @@ local function download(url, retries)
     return nil, "Download failed"
 end
 
--- ----------------------------------------------------------
 -- DISK
--- ----------------------------------------------------------
 local function listDisks()
     local out = {}
     for addr in component.list("filesystem") do
@@ -265,26 +252,23 @@ local function writeToDisk(proxy, path, content)
     return true
 end
 
--- ----------------------------------------------------------
 -- SCREENS
--- ----------------------------------------------------------
-
 local function screen_welcome()
     UI.clearScreen(W, H)
     local CX, CY, CW, CH = 6, 2, W-12, H-4
-    local contentY = drawCard(CX, CY, CW, CH, "FixOS 3.2.0 Setup")
+    local contentY = drawCard(CX, CY, CW, CH, "FixOS 3.2.2 Setup")
 
     gpu.setBackground(T.surface)
     UI.centerText(CX, contentY,     CW, "Welcome to FixOS Setup",  T.accent,        T.surface)
     UI.centerText(CX, contentY + 1, CW, "PIXEL PERFECT EDITION",   T.textSecondary, T.surface)
 
     local features = {
-        "[OK] Pixel-Perfect UI Library",
+        "[OK] Clean UI (no shadow artifacts)",
         "[OK] Language system (EN/UK/RU)",
-        "[OK] No shadow doubling",
-        "[OK] Scrollbar in all programs",
-        "[OK] Full terminal commands",
-        "[OK] Fixed update check",
+        "[OK] Wallpaper presets (8 colors)",
+        "[OK] Terminal with full commands",
+        "[OK] Text-mode web browser",
+        "[OK] Async update check",
     }
     for i, f in ipairs(features) do
         gpu.setForeground(T.success); gpu.setBackground(T.surface)
@@ -301,7 +285,6 @@ local function screen_welcome()
         end
     end
 
-    -- Big clear buttons
     local btnNext   = UI.drawButton(CX + 4,      H-4, 20, 2, "  Next ->  ",  "accent")
     local btnCancel = UI.drawButton(CX + CW - 24, H-4, 20, 2, "  Cancel   ", "secondary")
 
@@ -320,7 +303,7 @@ local function screen_disk()
     local contentY = drawCard(CX, CY, CW, CH, "Choose Installation Drive")
 
     gpu.setBackground(T.surface)
-    UI.centerText(CX, contentY, CW, "Select the drive for FixOS 3.2.0", T.textPrimary, T.surface)
+    UI.centerText(CX, contentY, CW, "Select the drive for FixOS 3.2.2", T.textPrimary, T.surface)
 
     gpu.setBackground(T.warning); gpu.fill(CX+2, contentY+2, CW-4, 1, " ")
     UI.centerText(CX+2, contentY+2, CW-4, "[!!]  ALL DATA WILL BE ERASED  [!!]", T.textOnAccent, T.warning)
@@ -343,7 +326,7 @@ local function screen_disk()
             gpu.set(CX+4, dy+1, "[D] " .. disk.label .. "  (" .. sz .. ")")
             gpu.set(CX+4, dy+2, "    " .. disk.address:sub(1,16))
             if disk.readOnly then
-                gpu.setForeground(T.danger); gpu.set(CX+4, dy+2, "    READ ONLY - Cannot install")
+                gpu.setForeground(T.danger); gpu.set(CX+4, dy+2, "    READ ONLY")
             end
 
             local btn = UI.drawButton(CX+2, dy+3, CW-4, 2,
@@ -379,7 +362,7 @@ local function screen_confirm(disk)
 
     gpu.setBackground(T.surface)
     statusIcon(CX+2, contentY, "warning")
-    UI.centerText(CX, contentY, CW, "    Ready to install FixOS 3.2.0", T.textPrimary, T.surface)
+    UI.centerText(CX, contentY, CW, "    Ready to install FixOS 3.2.2", T.textPrimary, T.surface)
 
     local steps = {"1. Format selected drive", "2. Download & install FixOS", "3. Set boot address"}
     for i, s in ipairs(steps) do
@@ -393,7 +376,7 @@ local function screen_confirm(disk)
     gpu.setForeground(T.textSecondary)
     gpu.set(CX+4, contentY+8, "         " .. disk.address:sub(1,16))
 
-    local midX   = math.floor(W/2)
+    local midX    = math.floor(W/2)
     local btnInst = UI.drawButton(midX - 22, contentY+11, 20, 2, "  INSTALL NOW  ", "accent")
     local btnCncl = UI.drawButton(midX +  2, contentY+11, 18, 2, "  Cancel  ",       "secondary")
 
@@ -413,7 +396,7 @@ local function screen_install(disk)
 
     local function redraw(step, file, pct, status)
         UI.clearScreen(W, H)
-        local y = drawCard(CX, CY, CW, CH, "Installing FixOS 3.2.0")
+        local y = drawCard(CX, CY, CW, CH, "Installing FixOS 3.2.2")
         UI.centerText(CX, y, CW, step, T.accent, T.surface)
         if file then
             UI.centerText(CX, y+1, CW, UI.truncate(file, CW-2), T.textSecondary, T.surface)
@@ -430,7 +413,6 @@ local function screen_install(disk)
         end
     end
 
-    -- Step 1: Format
     redraw("Preparing drive...", disk.label, 0, nil)
     if not formatDisk(disk.address) then
         redraw("Format failed", nil, 0, {kind="danger", msg="Cannot format drive"})
@@ -440,12 +422,10 @@ local function screen_install(disk)
     redraw("Preparing drive...", disk.label, 0.25, {kind="success", msg="Drive formatted"})
     os.sleep(0.3)
 
-    -- Step 2: Label
     redraw("Configuring...", "Setting label to 'FixOS'", 0.4, nil)
     pcall(proxy.setLabel, "FixOS")
     os.sleep(0.2)
 
-    -- Step 3: Download files
     local total = #FILES; local done = 0
     for _, f in ipairs(FILES) do
         local pct = 0.4 + (done / total) * 0.6
@@ -456,7 +436,7 @@ local function screen_install(disk)
             writeToDisk(proxy, f.target, data)
             done = done + 1
         else
-            redraw("Downloading files...", f.path, pct, {kind="warning", msg="Skipped: "..f.path})
+            redraw("Downloading files...", f.path, pct, {kind="warning", msg="Skipped"})
             os.sleep(0.3)
         end
         os.sleep(0.05)
@@ -478,21 +458,22 @@ local function screen_finish()
     local y = drawCard(CX, CY, CW, CH, "Setup Complete")
 
     statusIcon(math.floor(W/2)-2, y, "success")
-    UI.centerText(CX, y, CW, "    FixOS 3.2.0 installed!", T.success, T.surface)
+    UI.centerText(CX, y, CW, "    FixOS 3.2.2 installed!", T.success, T.surface)
 
     local details = {
         "Drive labeled: FixOS",
         "Boot address: set",
         "Languages: EN / UK / RU",
-        "UI Library: v3.2.0 installed",
+        "UI Library: v3.2.2 (clean)",
+        "Browser: included",
     }
     for i, d in ipairs(details) do
         gpu.setForeground(T.textSecondary); gpu.setBackground(T.surface)
         gpu.set(CX+4, y+2+i, "[OK] " .. d)
     end
 
-    gpu.setBackground(T.accentSubtle); gpu.fill(CX+2, y+8, CW-4, 1, " ")
-    UI.centerText(CX+2, y+8, CW-4, "Pixel-Perfect Edition 3.2.0", T.accent, T.accentSubtle)
+    gpu.setBackground(T.accentSubtle); gpu.fill(CX+2, y+9, CW-4, 1, " ")
+    UI.centerText(CX+2, y+9, CW-4, "Pixel-Perfect Edition 3.2.2", T.accent, T.accentSubtle)
 
     for i = 5, 1, -1 do
         gpu.setBackground(T.surface)
@@ -504,9 +485,7 @@ local function screen_finish()
     computer.shutdown(true)
 end
 
--- ----------------------------------------------------------
 -- MAIN
--- ----------------------------------------------------------
 local function main()
     if not screen_welcome() then
         UI.clearScreen(W, H); cText(math.floor(H/2), "Setup cancelled.", T.textPrimary)
