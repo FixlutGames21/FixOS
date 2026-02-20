@@ -1,11 +1,6 @@
 -- ==========================================================
--- FixOS 3.2.2 - system/programs/browser.lua
--- IMPROVEMENTS:
---   - Better HTML stripping (handles nested tags)
---   - Proper timeout protection (10s max)
---   - Error recovery with clear messages
---   - Status messages show progress
---   - Bookmark buttons properly sized
+-- FixOS 3.2.3 - system/programs/browser.lua
+-- FIX: Navigation now works correctly (no about:home loop)
 -- ==========================================================
 
 local browser = {}
@@ -40,7 +35,7 @@ function browser._showHome(win)
     win.lines = {
         "",
         "  ══════════════════════════════════════",
-        "      FixOS Browser v3.2.2",
+        "      FixOS Browser v3.2.3",
         "  ══════════════════════════════════════",
         "",
         "  Welcome to FixOS Browser!",
@@ -66,16 +61,14 @@ function browser._showHome(win)
     win.scrollY    = 0
     win.url        = "about:home"
     win.loadStatus = "Ready"
+    win.loading    = false
 end
 
--- Improved HTML stripper
 local function stripHtml(html)
     local s = html
-    -- Remove script/style blocks
     s = s:gsub("<script[^>]*>.-</script>", " ")
     s = s:gsub("<style[^>]*>.-</style>", " ")
     s = s:gsub("<!%-%-.-%%->", " ")
-    -- Block elements → newlines
     s = s:gsub("<br%s*/?>", "\n")
     s = s:gsub("<p[^>]*>", "\n")
     s = s:gsub("</p>", "\n")
@@ -87,9 +80,7 @@ local function stripHtml(html)
     s = s:gsub("<td[^>]*>", "  ")
     s = s:gsub("<a[^>]*>", "[")
     s = s:gsub("</a>", "]")
-    -- Remove all tags
     s = s:gsub("<[^>]*>", "")
-    -- Decode entities
     s = s:gsub("&nbsp;", " ")
     s = s:gsub("&amp;",  "&")
     s = s:gsub("&lt;",   "<")
@@ -99,11 +90,9 @@ local function stripHtml(html)
         local c = tonumber(n)
         return c and c <= 127 and string.char(c) or "?"
     end)
-    -- Collapse whitespace
     s = s:gsub("[ \t]+", " ")
     s = s:gsub("\n[ \t]+", "\n")
     s = s:gsub("\n\n+", "\n\n")
-    -- Split to lines
     local out = {}
     for line in (s.."\n"):gmatch("([^\n]*)\n") do
         table.insert(out, line)
@@ -116,7 +105,6 @@ local function wrapLine(line, w)
     local out = {}
     while #line > w do
         local cut = w
-        -- Try to break at space
         local sp = line:sub(1, w):match("^(.* )") or ""
         if #sp > 10 then cut = #sp end
         table.insert(out, line:sub(1, cut))
@@ -150,7 +138,7 @@ function browser.draw(win, gpu, cx, cy, cw, ch)
     win.elements = {}
     local y = cy
 
-    -- ==== Navigation bar ====
+    -- Navigation bar
     gpu.setBackground(T.surfaceAlt)
     gpu.fill(cx, y, cw, 1, " ")
 
@@ -170,7 +158,6 @@ function browser.draw(win, gpu, cx, cy, cw, ch)
     gpu.set(cx+8, y, "[R]")
     table.insert(win.elements, {x=cx+8, y=y, w=3, h=1, action="reload"})
 
-    -- URL bar
     local urlBarX = cx + 12
     local urlBarW = cw - 14
     local urlBg   = win.urlBarFocus and T.accentSubtle or T.surfaceInset
@@ -190,7 +177,7 @@ function browser.draw(win, gpu, cx, cy, cw, ch)
 
     y = cy + 1
 
-    -- ==== Bookmarks bar ====
+    -- Bookmarks
     gpu.setBackground(T.surfaceAlt)
     gpu.fill(cx, y, cw, 1, " ")
     local bx = cx + 1
@@ -206,7 +193,7 @@ function browser.draw(win, gpu, cx, cy, cw, ch)
 
     y = cy + 2
 
-    -- ==== Status bar ====
+    -- Status
     gpu.setBackground(win.loading and T.accentSubtle or T.surfaceAlt)
     gpu.fill(cx, y, cw, 1, " ")
     gpu.setForeground(win.loading and T.accent or T.textSecondary)
@@ -215,7 +202,7 @@ function browser.draw(win, gpu, cx, cy, cw, ch)
 
     y = cy + 3
 
-    -- ==== Content ====
+    -- Content
     local contentH = ch - 4
     local contentW = cw - 1
 
@@ -244,7 +231,6 @@ function browser.draw(win, gpu, cx, cy, cw, ch)
 
     UI.drawScrollbar(cx + cw - 1, y, contentH, math.max(contentH, #wrapped), contentH, win.scrollY)
 
-    -- Bottom status
     gpu.setBackground(T.surfaceAlt); gpu.fill(cx, cy + ch - 1, cw, 1, " ")
     gpu.setForeground(T.textSecondary)
     gpu.set(cx + 1, cy + ch - 1,
@@ -252,7 +238,6 @@ function browser.draw(win, gpu, cx, cy, cw, ch)
             #wrapped, win.scrollY + 1))
 end
 
--- ASYNC LOAD (tick called by desktop)
 function browser.tick(win)
     if not win.loading or not win._netHandle then return false end
 
@@ -281,17 +266,22 @@ function browser.tick(win)
         win.loading    = false
         win.loadStatus = "Done - " .. #raw .. " bytes"
 
-        if win.history[win.histIdx] ~= win._netUrl then
-            while #win.history > win.histIdx do table.remove(win.history) end
+        -- FIX: Add to history ONLY if different from current
+        if #win.history == 0 or win.history[#win.history] ~= win._netUrl then
+            -- Remove forward history if we navigated from middle
+            while #win.history > win.histIdx do
+                table.remove(win.history)
+            end
             table.insert(win.history, win._netUrl)
             win.histIdx = #win.history
         end
+        
         win.url = win._netUrl
         return true
 
     else
         win._netTimeout = (win._netTimeout or 0) + 1
-        if win._netTimeout > 500 then  -- 10s timeout
+        if win._netTimeout > 500 then
             pcall(win._netHandle.close)
             win._netHandle = nil
             win.loading    = false
@@ -303,15 +293,6 @@ function browser.tick(win)
                 "",
                 "  URL: " .. (win._netUrl or ""),
                 "",
-                "  Possible reasons:",
-                "    • Server is slow or unreachable",
-                "    • Network issues",
-                "    • Invalid URL",
-                "",
-                "  Try:",
-                "    • Check the URL spelling",
-                "    • Try a different website",
-                "    • Reload the page",
             }
             win.loadStatus = "Timeout"
             return true
@@ -320,32 +301,36 @@ function browser.tick(win)
     return false
 end
 
+-- FIX: Navigation logic corrected
 function browser.navigate(win, url)
     url = url:match("^%s*(.-)%s*$")
     if url == "" then return end
 
+    -- Add http:// if no protocol
     if not url:match("^https?://") and not url:match("^about:") then
         url = "http://" .. url
     end
 
+    -- Handle about:home specially
     if url == "about:home" then
-        browser._showHome(win); return
+        browser._showHome(win)
+        return
     end
 
+    -- Check for internet card
     if not component.isAvailable("internet") then
         win.lines = {
             "",
             "  [Error] No Internet Card",
             "",
             "  The Internet Card is required to browse the web.",
-            "",
-            "  Please install an Internet Card and try again.",
         }
         win.loadStatus = "No internet card"
         win.loading    = false
         return
     end
 
+    -- Start request
     local net = component.internet
     local ok, handle = pcall(net.request, url)
     if not ok or not handle then
@@ -356,13 +341,13 @@ function browser.navigate(win, url)
             "  Could not connect to:",
             "  " .. url,
             "",
-            "  Check the URL and try again.",
         }
         win.loadStatus = "Connection failed"
         win.loading    = false
         return
     end
 
+    -- Set loading state
     win._netHandle  = handle
     win._netBuf     = {}
     win._netGotData = false
@@ -418,7 +403,6 @@ function browser.click(win, clickX, clickY, btn)
 end
 
 function browser.key(win, char, code)
-    -- U = focus URL bar
     if not win.urlBarFocus and (char == 117 or char == 85) then
         win.urlBarFocus = true
         win.urlInput    = win.url

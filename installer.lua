@@ -110,6 +110,13 @@ local FILES = {
     { path="system/programs/terminal.lua",          target="/system/programs/terminal.lua"      },
     { path="system/programs/explorer.lua",          target="/system/programs/explorer.lua"      },
     { path="system/programs/browser.lua",           target="/system/programs/browser.lua"       },
+    { path="system/icons/mycomputer.png",           target="/system/icons/mycomputer.png"       },
+    { path="system/icons/calculator.png",           target="/system/icons/calculator.png"       },
+    { path="system/icons/browser.png",              target="/system/icons/browser.png"          },
+    { path="system/icons/explorer.png",             target="/system/icons/explorer.png"         },
+    { path="system/icons/terminal.png",             target="/system/icons/terminal.png"         },
+    { path="system/icons/settings.png",             target="/system/icons/settings.png"         },
+    { path="system/icons/notepad.png",              target="/system/icons/notepad.png"          },
     { path="version.txt",                           target="/version.txt"                       },
 }
 
