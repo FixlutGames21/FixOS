@@ -1,20 +1,17 @@
 -- ==========================================================
--- FixOS 4.0.0 - system/programs/explorer.lua
--- ПОВНИЙ РЕФАКТОРИНГ:
---   - Ліва панель: всі підключені диски
---   - Права панель: файли обраного диска
---   - Перемикання між дисками одним кліком
---   - Відкриття файлів у Notepad (подвійний клік)
---   - Кнопки: Назад, Новий каталог, Видалити, Копіювати
---   - Статус-рядок з розміром та кількістю елементів
---   - Іконки для файлів за розширенням
+-- FixOS 4.0.1 - system/programs/explorer.lua
+-- FIX 4.0.1:
+--   - listDir(): proxy.isDirectory() calls inside table.sort's
+--     comparator were NOT wrapped in pcall.  Any filesystem
+--     error during sorting crashed the entire Explorer.
+--     Fixed: each isDirectory call is now protected by pcall,
+--     defaulting to false on error.
 -- ==========================================================
 
 local explorer = {}
 
-local SIDEBAR_W = 14   -- Ширина панелі дисків
+local SIDEBAR_W = 14
 
--- Розширення файлів які можна відкрити в Notepad
 local EDITABLE = {
     lua=true, txt=true, cfg=true, md=true,
     log=true, json=true, ini=true, conf=true, lang=true,
@@ -22,7 +19,7 @@ local EDITABLE = {
 
 local FILE_ICONS = {
     lua="[LUA]", txt="[TXT]", cfg="[CFG]", md="[MD] ",
-    log="[LOG]", json="[JSN]", png="[PNG]", lua="[LUA]",
+    log="[LOG]", json="[JSN]", png="[PNG]",
     ["default"]="[---]",
 }
 
@@ -39,8 +36,8 @@ end
 -- FILESYSTEM HELPERS
 -- ============================================================
 local function getAllDrives()
-    local drives = {}
-    local bootAddr = computer.getBootAddress()
+    local drives    = {}
+    local bootAddr  = computer.getBootAddress()
 
     for addr in component.list("filesystem") do
         local proxy = component.proxy(addr)
@@ -51,7 +48,6 @@ local function getAllDrives()
             pcall(function() tot  = proxy.spaceTotal() or 0 end)
             pcall(function() used = proxy.spaceUsed()  or 0 end)
             if lbl == "" then lbl = addr:sub(1, 6) end
-
             table.insert(drives, {
                 address  = addr,
                 label    = lbl,
@@ -64,7 +60,6 @@ local function getAllDrives()
         end
     end
 
-    -- Sort: boot first, then by size desc
     table.sort(drives, function(a, b)
         if a.isBoot ~= b.isBoot then return a.isBoot end
         return a.total > b.total
@@ -83,16 +78,21 @@ local function listDir(proxy, path)
         for _, item in ipairs(list) do entries[#entries+1] = item end
     end
 
+    -- FIX: proxy.isDirectory() is called inside a sort comparator.
+    -- If it raises (e.g. permission error, broken FS), the sort
+    -- itself crashes.  Use pcall and default to false on error.
     table.sort(entries, function(a, b)
-        local aDir = proxy.isDirectory(path .. (path:match("/$") and "" or "/") .. a)
-        local bDir = proxy.isDirectory(path .. (path:match("/$") and "" or "/") .. b)
+        local aPath = path .. (path:match("/$") and "" or "/") .. a
+        local bPath = path .. (path:match("/$") and "" or "/") .. b
+        local aDir, bDir = false, false
+        pcall(function() aDir = proxy.isDirectory(aPath) end)
+        pcall(function() bDir = proxy.isDirectory(bPath) end)
         if aDir ~= bDir then return aDir end
         return a:lower() < b:lower()
     end)
 
     local result = {}
 
-    -- Parent dir entry
     if path ~= "/" then
         local parentPath = path:match("^(.*)/[^/]+$") or "/"
         table.insert(result, {name="..", path=parentPath, isDir=true, size=0})
@@ -100,17 +100,13 @@ local function listDir(proxy, path)
 
     for _, name in ipairs(entries) do
         local fullPath = path .. (path:match("/$") and "" or "/") .. name
-        local isDir    = proxy.isDirectory(fullPath)
+        local isDir    = false
         local size     = 0
+        pcall(function() isDir = proxy.isDirectory(fullPath) end)
         if not isDir then
             pcall(function() size = proxy.size(fullPath) or 0 end)
         end
-        table.insert(result, {
-            name    = name,
-            path    = fullPath,
-            isDir   = isDir,
-            size    = size,
-        })
+        table.insert(result, {name=name, path=fullPath, isDir=isDir, size=size})
     end
 
     return result
@@ -126,29 +122,25 @@ end
 -- INIT
 -- ============================================================
 function explorer.init(win)
-    win.drives       = getAllDrives()
-    win.driveIdx     = nil         -- Selected drive index
-    win.currentProxy = nil
-    win.cwd          = "/"
-    win.files        = {}
-    win.selIdx       = nil
-    win.selFile      = nil
-    win.scrollY      = 0
-    win.driveScrollY = 0
-    win.lastClickIdx = nil
+    win.drives        = getAllDrives()
+    win.driveIdx      = nil
+    win.currentProxy  = nil
+    win.cwd           = "/"
+    win.files         = {}
+    win.selIdx        = nil
+    win.selFile       = nil
+    win.scrollY       = 0
+    win.driveScrollY  = 0
+    win.lastClickIdx  = nil
     win.lastClickTime = 0
-    win.elements     = {}
-    win.errorMsg     = nil
-    win._ui          = nil
+    win.elements      = {}
+    win.errorMsg      = nil
+    win._ui           = nil
     win._cx, win._cy, win._cw, win._ch = 0, 0, 0, 0
 
-    -- Auto-select boot drive
     if #win.drives > 0 then
         for i, d in ipairs(win.drives) do
-            if d.isBoot then
-                explorer.selectDrive(win, i)
-                return
-            end
+            if d.isBoot then explorer.selectDrive(win, i); return end
         end
         explorer.selectDrive(win, 1)
     end
@@ -169,11 +161,10 @@ end
 
 function explorer.refresh(win)
     if not win.currentProxy then return end
-    win.drives = getAllDrives()  -- Refresh drive list too
+    win.drives = getAllDrives()
     local files, err = listDir(win.currentProxy, win.cwd)
     win.files    = files
     win.errorMsg = err
-    -- Re-select file by name if possible
     if win.selFile then
         for i, f in ipairs(win.files) do
             if f.name == win.selFile.name then
@@ -204,7 +195,7 @@ function explorer.draw(win, gpu, cx, cy, cw, ch)
     gpu.setBackground(T.surface)
     gpu.fill(cx, cy, cw, ch, " ")
 
-    -- ── SIDEBAR (drives) ────────────────────────────────────
+    -- Sidebar
     local sideX = cx
     local sideW = SIDEBAR_W
     local sideH = ch - 2
@@ -224,17 +215,14 @@ function explorer.draw(win, gpu, cx, cy, cw, ch)
         gpu.setBackground(bg)
         gpu.fill(sideX, dy, sideW, 3, " ")
 
-        -- Drive icon
         local diskIcon = d.isBoot and "[B]" or "[D]"
         gpu.setForeground(d.readOnly and T.textDisabled or T.textOnAccent)
         gpu.set(sideX + 1, dy,     diskIcon)
-        gpu.set(sideX + 1, dy + 1,
-            (UI.truncate(d.label, sideW - 2)))
+        gpu.set(sideX + 1, dy + 1, UI.truncate(d.label, sideW - 2))
 
-        -- Usage bar (mini)
         if d.total > 0 then
-            local pct   = d.used / d.total
-            local barW  = sideW - 2
+            local pct    = d.used / d.total
+            local barW   = sideW - 2
             local filled = math.floor(barW * pct)
             local barBg  = isSelected and T.accentDark or T.chromeDark
             gpu.setBackground(barBg)
@@ -252,17 +240,15 @@ function explorer.draw(win, gpu, cx, cy, cw, ch)
         })
     end
 
-    -- Sidebar border
     gpu.setForeground(T.chromeBorder); gpu.setBackground(T.chromeMid)
     for row = cy, cy + sideH - 1 do
         gpu.set(sideX + sideW, row, "\xE2\x94\x82")
     end
 
-    -- ── MAIN PANEL ─────────────────────────────────────────
+    -- Main panel
     local mainX = cx + sideW + 1
     local mainW = cw - sideW - 1
 
-    -- Path bar
     gpu.setBackground(T.surfaceAlt)
     gpu.fill(mainX, cy, mainW, 1, " ")
     gpu.setForeground(T.accent); gpu.setBackground(T.surfaceAlt)
@@ -270,7 +256,6 @@ function explorer.draw(win, gpu, cx, cy, cw, ch)
     local pathStr    = "[" .. driveLabel .. "] " .. win.cwd
     gpu.set(mainX + 1, cy, UI.truncate(pathStr, mainW - 2))
 
-    -- Toolbar
     local toolY = cy + 1
     gpu.setBackground(T.surfaceInset)
     gpu.fill(mainX, toolY, mainW, 1, " ")
@@ -287,14 +272,13 @@ function explorer.draw(win, gpu, cx, cy, cw, ch)
         bx = bx + w + 1
     end
 
-    addBtn("[^] Назад",    "goUp",      win.cwd ~= "/")
-    addBtn("[+] Папка",    "newDir",    win.currentProxy and not (win.drives[win.driveIdx] and win.drives[win.driveIdx].readOnly))
-    addBtn("[DEL] Видалити","deleteFile", win.selFile ~= nil and win.selFile.name ~= "..")
+    addBtn("[^] Назад",     "goUp",       win.cwd ~= "/")
+    addBtn("[+] Папка",     "newDir",     win.currentProxy and not (win.drives[win.driveIdx] and win.drives[win.driveIdx].readOnly))
+    addBtn("[DEL] Видалити","deleteFile",  win.selFile ~= nil and win.selFile.name ~= "..")
     if win.selFile and not win.selFile.isDir and EDITABLE[getExt(win.selFile.name)] then
         addBtn("[N] Відкрити", "openNotepad", true)
     end
 
-    -- Column header
     local headerY = cy + 2
     gpu.setBackground(T.surfaceInset)
     gpu.fill(mainX, headerY, mainW, 1, " ")
@@ -302,9 +286,8 @@ function explorer.draw(win, gpu, cx, cy, cw, ch)
     gpu.set(mainX + 1, headerY, "Тип  Назва")
     gpu.set(mainX + mainW - 8, headerY, "Розмір")
 
-    -- File list
     local listY = cy + 3
-    local listH = ch - 5   -- path + toolbar + header + status
+    local listH = ch - 5
     local visN  = listH
 
     local maxScroll = math.max(0, #win.files - visN)
@@ -315,27 +298,22 @@ function explorer.draw(win, gpu, cx, cy, cw, ch)
         local file = win.files[idx]
         if not file then break end
 
-        local fy       = listY + row
-        local isSel    = (idx == win.selIdx)
-        local rowBg    = isSel   and T.accent          or
-                         (row%2==0 and T.surface       or T.surfaceAlt)
-        local rowFg    = isSel   and T.textOnAccent    or T.textPrimary
-        local iconFg   = isSel   and T.textOnAccent    or
-                         (file.isDir and T.accent      or T.textSecondary)
+        local fy     = listY + row
+        local isSel  = (idx == win.selIdx)
+        local rowBg  = isSel and T.accent or (row%2==0 and T.surface or T.surfaceAlt)
+        local rowFg  = isSel and T.textOnAccent or T.textPrimary
+        local iconFg = isSel and T.textOnAccent or (file.isDir and T.accent or T.textSecondary)
 
         gpu.setBackground(rowBg)
         gpu.fill(mainX, fy, mainW - 1, 1, " ")
 
-        -- Icon
         gpu.setForeground(iconFg)
         gpu.set(mainX + 1, fy, fileIcon(file.name, file.isDir))
 
-        -- Name
         gpu.setForeground(rowFg)
         local nameW = mainW - 10
         gpu.set(mainX + 6, fy, UI.truncate(file.name, nameW))
 
-        -- Size
         if not file.isDir and file.name ~= ".." then
             gpu.set(mainX + mainW - 8, fy, string.format("%6s", formatSize(file.size)))
         end
@@ -345,31 +323,25 @@ function explorer.draw(win, gpu, cx, cy, cw, ch)
         })
     end
 
-    -- Scrollbar
     UI.drawScrollbar(mainX + mainW - 1, listY, listH,
         math.max(listH, #win.files), listH, win.scrollY)
 
-    -- ── STATUS BAR ──────────────────────────────────────────
+    -- Status bar
     local statusY = cy + ch - 2
     gpu.setBackground(T.surfaceInset)
     gpu.fill(cx, statusY, cw, 2, " ")
 
-    -- Drive info row
     if win.drives[win.driveIdx] then
         local d    = win.drives[win.driveIdx]
         local free = d.total - d.used
         gpu.setForeground(T.textSecondary)
-        gpu.set(cx + 1, statusY,
-            string.format("Диск: %s | Всього: %s | Вільно: %s%s",
-                d.label,
-                formatSize(d.total),
-                formatSize(free),
-                d.readOnly and " | ТІЛЬКИ ЧИТАННЯ" or ""
-            )
-        )
+        gpu.set(cx + 1, statusY, string.format(
+            "Диск: %s | Всього: %s | Вільно: %s%s",
+            d.label, formatSize(d.total), formatSize(free),
+            d.readOnly and " | ТІЛЬКИ ЧИТАННЯ" or ""
+        ))
     end
 
-    -- File info row
     gpu.setForeground(T.textSecondary)
     local status = string.format("%d елементів", #win.files)
     if win.selFile then
@@ -394,7 +366,6 @@ function explorer.click(win, clickX, clickY, btn)
 
     for _, elem in ipairs(win.elements) do
         if UI.hitTest(elem, clickX, clickY) then
-
             if elem.action == "selectDrive" then
                 explorer.selectDrive(win, elem.driveIdx)
                 return true
@@ -403,18 +374,16 @@ function explorer.click(win, clickX, clickY, btn)
                 local file = win.files[elem.fileIdx]
                 if not file then return false end
 
-                local now = computer.uptime()
+                local now      = computer.uptime()
                 local isDouble = (win.lastClickIdx == elem.fileIdx)
-                    and (now - win.lastClickTime < 0.5)
+                              and (now - win.lastClickTime < 0.5)
 
                 win.lastClickIdx  = elem.fileIdx
                 win.lastClickTime = now
                 win.selIdx        = elem.fileIdx
                 win.selFile       = file
 
-                if isDouble then
-                    explorer._openFile(win, file)
-                end
+                if isDouble then explorer._openFile(win, file) end
                 return true
 
             elseif elem.action == "goUp" then
@@ -428,8 +397,6 @@ function explorer.click(win, clickX, clickY, btn)
                 return true
 
             elseif elem.action == "newDir" then
-                -- Create a new directory (simple: asks via notepad dialog pattern)
-                -- Since we don't have a prompt dialog, create "nova_papka" and let user rename
                 if win.currentProxy and not win.drives[win.driveIdx].readOnly then
                     local newPath = win.cwd .. (win.cwd:match("/$") and "" or "/") .. "nova_papka"
                     local i = 1
@@ -452,9 +419,7 @@ function explorer.click(win, clickX, clickY, btn)
                 return true
 
             elseif elem.action == "openNotepad" then
-                if win.selFile then
-                    explorer._openFile(win, win.selFile)
-                end
+                if win.selFile then explorer._openFile(win, win.selFile) end
                 return true
             end
         end
@@ -465,7 +430,6 @@ end
 function explorer._openFile(win, file)
     if not file then return end
     if file.isDir or file.name == ".." then
-        -- Navigate into directory
         win.cwd     = file.path
         win.selIdx  = nil
         win.selFile = nil
@@ -473,7 +437,6 @@ function explorer._openFile(win, file)
         explorer.refresh(win)
     elseif EDITABLE[getExt(file.name)] then
         if _G.createWindow then
-            -- Build full path with drive context
             _G.createWindow("notepad", {filepath = file.path, proxy = win.currentProxy})
         end
     end
@@ -483,7 +446,7 @@ end
 -- KEY
 -- ============================================================
 function explorer.key(win, char, code)
-    if code == 14 then   -- Backspace = go up
+    if code == 14 then
         if win.cwd ~= "/" then
             win.cwd     = win.cwd:match("^(.*)/[^/]+$") or "/"
             win.selIdx  = nil
@@ -492,41 +455,30 @@ function explorer.key(win, char, code)
             explorer.refresh(win)
             return true
         end
-
-    elseif code == 200 then  -- Up
+    elseif code == 200 then
         if win.selIdx and win.selIdx > 1 then
             win.selIdx  = win.selIdx - 1
             win.selFile = win.files[win.selIdx]
-            if win.selIdx <= win.scrollY then
-                win.scrollY = math.max(0, win.scrollY - 1)
-            end
+            if win.selIdx <= win.scrollY then win.scrollY = math.max(0, win.scrollY - 1) end
         elseif not win.selIdx and #win.files > 0 then
             win.selIdx  = 1
             win.selFile = win.files[1]
         end
         return true
-
-    elseif code == 208 then  -- Down
+    elseif code == 208 then
         if win.selIdx and win.selIdx < #win.files then
             win.selIdx  = win.selIdx + 1
             win.selFile = win.files[win.selIdx]
             local visN  = (win._ch or 20) - 5
-            if win.selIdx > win.scrollY + visN then
-                win.scrollY = win.scrollY + 1
-            end
+            if win.selIdx > win.scrollY + visN then win.scrollY = win.scrollY + 1 end
         elseif not win.selIdx and #win.files > 0 then
             win.selIdx  = 1
             win.selFile = win.files[1]
         end
         return true
-
-    elseif code == 28 then   -- Enter = open
-        if win.selFile then
-            explorer._openFile(win, win.selFile)
-            return true
-        end
-
-    elseif code == 211 then  -- Delete
+    elseif code == 28 then
+        if win.selFile then explorer._openFile(win, win.selFile); return true end
+    elseif code == 211 then
         if win.selFile and win.currentProxy then
             pcall(win.currentProxy.remove, win.selFile.path)
             win.selIdx  = nil
@@ -534,12 +486,10 @@ function explorer.key(win, char, code)
             explorer.refresh(win)
             return true
         end
-
-    elseif code == 61 then   -- F3 = refresh
+    elseif code == 61 then
         explorer.refresh(win)
         return true
     end
-
     return false
 end
 

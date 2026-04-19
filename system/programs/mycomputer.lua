@@ -1,13 +1,12 @@
 -- ==========================================================
--- FixOS 4.0.0 - system/programs/mycomputer.lua
--- ПОВНИЙ РЕФАКТОРИНГ:
---   - Показує ВСІ підключені диски (не тільки завантажувальний)
---   - Показує адресу, мітку, тип, розмір, вільне місце
---   - Градієнтний прогрес-бар використання
---   - Клік по диску -> відкриває Explorer на цьому диску
---   - Секція компонентів: GPU, CPU, Internet Card
---   - Пам'ять: графік використання
---   - Оновлення в реальному часі (tick)
+-- FixOS 4.0.1 - system/programs/mycomputer.lua
+-- FIX 4.0.1:
+--   - click "openDrive": previously stored the drive address in
+--     expWin._targetDriveAddr but Explorer never reads that field,
+--     so the Explorer always opened on the default (boot) drive.
+--     Fixed: after createWindow(), we iterate expWin.drives to
+--     find the matching address and call explorer.selectDrive()
+--     directly, just like clicking the drive in Explorer's sidebar.
 -- ==========================================================
 
 local mycomp = {}
@@ -25,7 +24,7 @@ local function formatSize(bytes)
 end
 
 local function getAllDrives()
-    local drives = {}
+    local drives   = {}
     local bootAddr = computer.getBootAddress()
 
     for addr in component.list("filesystem") do
@@ -37,7 +36,6 @@ local function getAllDrives()
             pcall(function() tot  = proxy.spaceTotal() or 0 end)
             pcall(function() used = proxy.spaceUsed()  or 0 end)
             if lbl == "" then lbl = addr:sub(1, 8) end
-
             table.insert(drives, {
                 address  = addr,
                 label    = lbl,
@@ -93,20 +91,19 @@ function mycomp.init(win)
 end
 
 -- ============================================================
--- TICK (refresh drives every 3 seconds)
+-- TICK
 -- ============================================================
 function mycomp.tick(win)
     local now = computer.uptime()
     if now - win._lastTick < 3 then return false end
     win._lastTick = now
-    -- Re-read used space (changes as files are written)
     for _, d in ipairs(win.drives) do
         pcall(function()
             d.used = d.proxy.spaceUsed() or d.used
             d.free = d.total - d.used
         end)
     end
-    return true  -- redraw
+    return true
 end
 
 -- ============================================================
@@ -126,7 +123,7 @@ function mycomp.draw(win, gpu, cx, cy, cw, ch)
     win.elements = {}
     local y = cy
 
-    -- ── HEADER ──────────────────────────────────────────────
+    -- Header
     gpu.setBackground(T.accent)
     gpu.fill(cx, y, cw, 2, " ")
     gpu.setForeground(T.textOnAccent)
@@ -138,7 +135,7 @@ function mycomp.draw(win, gpu, cx, cy, cw, ch)
     ))
     y = y + 3
 
-    -- ── MEMORY BAR ─────────────────────────────────────────
+    -- Memory bar
     local memTotal = computer.totalMemory()
     local memUsed  = memTotal - computer.freeMemory()
     local memPct   = memUsed / memTotal
@@ -146,42 +143,36 @@ function mycomp.draw(win, gpu, cx, cy, cw, ch)
     UI.drawProgressBar(cx + 1, y, cw - 2, memPct, barColor)
     y = y + 2
 
-    -- ── DISKS SECTION ───────────────────────────────────────
+    -- Disks section
     gpu.setForeground(T.accent); gpu.setBackground(T.surface)
     gpu.set(cx + 1, y, "Диски (" .. #win.drives .. ")")
     gpu.setForeground(T.borderSubtle)
     for col = cx + 10, cx + cw - 2 do gpu.set(col, y, "\xE2\x94\x80") end
     y = y + 1
 
-    -- Drive list
     local maxScroll = math.max(0, #win.drives * 5 - (ch - 14))
     if win.scrollY > maxScroll then win.scrollY = maxScroll end
 
     local startDrive = math.floor(win.scrollY / 5) + 1
-    local localOff   = win.scrollY % 5
 
     for idx = startDrive, #win.drives do
-        local d    = win.drives[idx]
+        local d     = win.drives[idx]
         local cardH = 4
         if y + cardH > cy + ch - 6 then break end
 
         local isSelected = (idx == win.selDrive)
-        local cardBg = isSelected and T.accentSubtle or T.surfaceAlt
+        local cardBg     = isSelected and T.accentSubtle or T.surfaceAlt
 
-        -- Card background
         gpu.setBackground(cardBg)
         gpu.fill(cx + 1, y, cw - 2, cardH, " ")
 
-        -- Left color stripe
         local stripeColor = d.isBoot and T.accent or T.tileGray
         if d.readOnly then stripeColor = T.textDisabled end
         gpu.setBackground(stripeColor)
         gpu.fill(cx + 1, y, 1, cardH, " ")
 
-        -- Drive info
         gpu.setBackground(cardBg)
 
-        -- Line 1: Icon + Label + Status
         local diskIcon = d.isBoot and "[*B*]" or "[ D ]"
         gpu.setForeground(T.accent)
         gpu.set(cx + 3, y, diskIcon .. " " .. d.label)
@@ -194,12 +185,10 @@ function mycomp.draw(win, gpu, cx, cy, cw, ch)
             gpu.set(cx + cw - 12, y, "[ONLY-R]")
         end
 
-        -- Line 2: Address
         gpu.setForeground(T.textSecondary)
         gpu.set(cx + 3, y + 1, "Адреса: " .. d.address:sub(1, 20) .. "...")
 
-        -- Line 3: Size info
-        local pct   = d.total > 0 and (d.used / d.total) or 0
+        local pct     = d.total > 0 and (d.used / d.total) or 0
         local sizeStr = string.format(
             "Зайнято: %s / %s  (Вільно: %s)",
             formatSize(d.used), formatSize(d.total), formatSize(d.free)
@@ -207,12 +196,11 @@ function mycomp.draw(win, gpu, cx, cy, cw, ch)
         gpu.setForeground(T.textSecondary)
         gpu.set(cx + 3, y + 2, UI.truncate(sizeStr, cw - 5))
 
-        -- Line 4: Usage bar
         local barW = cw - 4
         gpu.setBackground(T.progressTrack)
         gpu.fill(cx + 2, y + 3, barW, 1, " ")
         if pct > 0 then
-            local filled   = math.max(1, math.floor(barW * pct))
+            local filled    = math.max(1, math.floor(barW * pct))
             local fillColor = pct > 0.9 and T.danger or (pct > 0.7 and T.warning or T.success)
             gpu.setBackground(fillColor)
             gpu.fill(cx + 2, y + 3, filled, 1, " ")
@@ -224,7 +212,6 @@ function mycomp.draw(win, gpu, cx, cy, cw, ch)
         gpu.setBackground(onBar and (pct > 0.9 and T.danger or (pct > 0.7 and T.warning or T.success)) or T.progressTrack)
         gpu.set(pctX, y + 3, pctStr)
 
-        -- Click target for opening explorer
         table.insert(win.elements, {
             x=cx+1, y=y, w=cw-2, h=cardH,
             action="openDrive", driveAddr=d.address, driveIdx=idx
@@ -233,7 +220,7 @@ function mycomp.draw(win, gpu, cx, cy, cw, ch)
         y = y + cardH + 1
     end
 
-    -- ── COMPONENTS SECTION ──────────────────────────────────
+    -- Components section
     if y + 4 <= cy + ch then
         gpu.setForeground(T.accent); gpu.setBackground(T.surface)
         gpu.set(cx + 1, y, "Компоненти")
@@ -254,17 +241,17 @@ function mycomp.draw(win, gpu, cx, cy, cw, ch)
         end
     end
 
-    -- ── FOOTER ──────────────────────────────────────────────
+    -- Footer
     gpu.setBackground(T.surfaceInset)
     gpu.fill(cx, cy + ch - 1, cw, 1, " ")
     gpu.setForeground(T.textSecondary)
     local uptime = math.floor(computer.uptime())
-    local h = math.floor(uptime/3600)
-    local m = math.floor((uptime%3600)/60)
-    local s = uptime % 60
-    gpu.set(cx + 1, cy + ch - 1,
-        string.format("Uptime: %02d:%02d:%02d | Диски: %d | Клік -> відкрити у провіднику",
-            h, m, s, #win.drives))
+    local hh = math.floor(uptime/3600)
+    local mm = math.floor((uptime%3600)/60)
+    local ss = uptime % 60
+    gpu.set(cx + 1, cy + ch - 1, string.format(
+        "Uptime: %02d:%02d:%02d | Диски: %d | Клік -> відкрити у провіднику",
+        hh, mm, ss, #win.drives))
 end
 
 -- ============================================================
@@ -278,16 +265,24 @@ function mycomp.click(win, clickX, clickY, btn)
         if UI.hitTest(elem, clickX, clickY) then
             if elem.action == "openDrive" then
                 win.selDrive = elem.driveIdx
-                -- Open explorer focused on this drive
+
                 if _G.createWindow then
                     local expWin = _G.createWindow("explorer")
-                    if expWin and expWin.program and expWin.program.selectDrive then
-                        -- Find matching drive index in explorer
-                        if expWin._driveAddr == nil then
-                            expWin._targetDriveAddr = elem.driveAddr
+
+                    -- FIX: The old code stored the address in expWin._targetDriveAddr
+                    -- but explorer.lua never reads that field, so the drive was never
+                    -- pre-selected.  We now iterate expWin.drives (populated by
+                    -- explorer.init) and call selectDrive() directly.
+                    if expWin and expWin.program and expWin.drives then
+                        for i, d in ipairs(expWin.drives) do
+                            if d.address == elem.driveAddr then
+                                expWin.program.selectDrive(expWin, i)
+                                break
+                            end
                         end
                     end
                 end
+
                 return true
             end
         end

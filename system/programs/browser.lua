@@ -1,18 +1,14 @@
 -- ==========================================================
--- FixOS 4.0.0 - system/programs/browser.lua
--- ПОВНИЙ РЕФАКТОРИНГ:
---   - Виправлена мережева логіка (правильна async для OC)
---   - response() перевіряється окремо від read()
---   - Підтримка HTTP кодів відповіді (200, 301, 404...)
---   - Авто-redirect на HTTPS якщо HTTP не вдається
---   - Покращений HTML-парсер (multiline script/style)
---   - Пагінація контенту
---   - Статус-рядок з розміром та часом
+-- FixOS 4.0.1 - system/programs/browser.lua
+-- FIX 4.0.1:
+--   - navigate(): url:match("https?://([^/]+)") can return nil
+--     when the URL is malformed.  Concatenating a string with nil
+--     crashes Lua.  Fixed with (... or url) grouping.
 -- ==========================================================
 
 local browser = {}
 
-local VERSION = "4.0.0"
+local VERSION = "4.0.1"
 
 local BOOKMARKS = {
     {name="Дім",        url="about:home"},
@@ -37,15 +33,13 @@ function browser.init(win)
     win.elements     = {}
     win._ui          = nil
 
-    -- Network state machine
-    -- phase: "idle" | "connecting" | "reading" | "done"
     win._phase       = "idle"
     win._netHandle   = nil
     win._netBuf      = {}
     win._netUrl      = ""
     win._historyNav  = false
     win._timeout     = 0
-    win._maxTimeout  = 800   -- ~16 seconds (800 * 0.02s tick)
+    win._maxTimeout  = 800
     win._bytesRead   = 0
     win._startTime   = 0
 
@@ -63,30 +57,28 @@ function browser._showHome(win)
         "  \xE2\x95\x9A\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x9D",
         "",
         "  Як користуватись:",
-        "  ─────────────────",
+        "  -----------------",
         "    [U]     - фокус на адресний рядок",
         "    [Enter] - перейти за адресою",
         "    [<] [>] - назад / вперед",
         "    [R]     - перезавантажити",
         "    [Esc]   - скасувати введення",
-        "    Scroll  - прокрутка колесом або стрілками",
+        "    Scroll  - прокрутка",
         "",
         "  Підтримується:",
-        "  ─────────────────",
+        "  ---------------",
         "    [OK] HTTP / HTTPS запити",
         "    [OK] HTML -> текст (авто-конвертація)",
         "    [OK] Plain text, Markdown, JSON",
         "    [OK] HTTP статус-коди (200, 404, 500...)",
-        "    [OK] Перенаправлення (redirect)",
         "    [OK] Закладки",
         "    [OK] Повна історія навігації",
         "",
         "  Приклади адрес:",
-        "  ─────────────────",
+        "  ----------------",
         "    github.com",
         "    pastebin.com/raw/xxxxx",
         "    en.m.wikipedia.org/wiki/Lua",
-        "    example.com",
         "",
     }
     win.scrollY    = 0
@@ -102,12 +94,10 @@ end
 local function stripHtml(raw)
     local s = raw
 
-    -- Remove <head> entirely
     s = s:gsub("<[Hh][Ee][Aa][Dd][^>]*>", "\0HEAD\0")
     s = s:gsub("<[Ss][Cc][Rr][Ii][Pp][Tt][^>]*>", "\0SCRIPT\0")
     s = s:gsub("<[Ss][Tt][Yy][Ll][Ee][^>]*>",     "\0STYLE\0")
 
-    -- Remove blocks (handles newlines inside tags)
     local function removeBlock(src, opener, closers)
         local result = {}
         local pos = 1
@@ -118,7 +108,6 @@ local function stripHtml(raw)
                 break
             end
             result[#result+1] = src:sub(pos, s1 - 1)
-            -- Find any closing tag (case-insensitive via multiple patterns)
             local best = nil
             for _, cl in ipairs(closers) do
                 local s2, e2 = src:find(cl, e1 + 1)
@@ -136,10 +125,7 @@ local function stripHtml(raw)
     s = removeBlock(s, "\0SCRIPT\0", {"</script>","</SCRIPT>","</Script>"})
     s = removeBlock(s, "\0STYLE\0",  {"</style>","</STYLE>","</Style>"})
 
-    -- HTML comments
     s = s:gsub("<!%-%-.-%-%->", "")
-
-    -- Structural elements -> newlines
     s = s:gsub("<[Bb][Rr]%s*/?>",             "\n")
     s = s:gsub("<[Hh][Rr]%s*/?>",             "\n" .. string.rep("-", 40) .. "\n")
     s = s:gsub("<[Pp][^>]*>",                 "\n")
@@ -149,43 +135,32 @@ local function stripHtml(raw)
     s = s:gsub("<[Ss][Ee][Cc][Tt][Ii][Oo][Nn][^>]*>", "\n")
     s = s:gsub("<[Aa][Rr][Tt][Ii][Cc][Ll][Ee][^>]*>", "\n")
 
-    -- Headings
     for n = 1, 6 do
         local pre = n <= 2 and "==" or (n <= 4 and "--" or "  ")
         s = s:gsub("<[Hh]"..n.."[^>]*>", "\n" .. pre .. " ")
         s = s:gsub("</"  .."[Hh]"..n..">", " " .. pre .. "\n")
     end
 
-    -- Lists
     s = s:gsub("<[Uu][Ll][^>]*>", "\n")
     s = s:gsub("<[Oo][Ll][^>]*>", "\n")
     s = s:gsub("<[Ll][Ii][^>]*>", "\n  * ")
-
-    -- Tables
     s = s:gsub("<[Tt][Rr][^>]*>", "\n")
     s = s:gsub("<[Tt][Hh][^>]*>", " | ")
     s = s:gsub("<[Tt][Dd][^>]*>", " | ")
 
-    -- Links: show URL in brackets
     s = s:gsub('<[Aa][^>]*[Hh][Rr][Ee][Ff]="([^"]*)"[^>]*>', "[")
     s = s:gsub("</[Aa]>", "]")
 
-    -- Bold/italic markers
     s = s:gsub("<[Bb][^>]*>",      "**")
     s = s:gsub("</"      .."[Bb]>","**")
     s = s:gsub("<[Ii][^>]*>",      "_")
     s = s:gsub("</"      .."[Ii]>","_")
     s = s:gsub("<[Ss][Tt][Rr][Oo][Nn][Gg][^>]*>", "**")
     s = s:gsub("</"              .."[Ss][Tt][Rr][Oo][Nn][Gg]>", "**")
-
-    -- Pre/code blocks
     s = s:gsub("<[Pp][Rr][Ee][^>]*>", "\n```\n")
     s = s:gsub("</"      .."[Pp][Rr][Ee]>", "\n```\n")
-
-    -- Strip all remaining tags
     s = s:gsub("<[^>]*>", "")
 
-    -- HTML entities
     local entities = {
         nbsp=" ", amp="&", lt="<", gt=">", quot='"',
         apos="'", mdash="—", ndash="–", hellip="...",
@@ -204,22 +179,18 @@ local function stripHtml(raw)
         return (c and c >= 32 and c <= 126) and string.char(c) or " "
     end)
 
-    -- Clean up whitespace
-    s = s:gsub("[ \t]+",      " ")
-    s = s:gsub("^ +",         "")
-    s = s:gsub("\n +",        "\n")
-    s = s:gsub(" +\n",        "\n")
-    s = s:gsub("\n\n\n+",     "\n\n")
+    s = s:gsub("[ \t]+",  " ")
+    s = s:gsub("^ +",     "")
+    s = s:gsub("\n +",    "\n")
+    s = s:gsub(" +\n",    "\n")
+    s = s:gsub("\n\n\n+", "\n\n")
 
     local out = {}
     for line in (s.."\n"):gmatch("([^\n]*)\n") do
         table.insert(out, line)
     end
-
-    -- Trim empty lines at start/end
-    while #out > 0 and out[1]:match("^%s*$") do table.remove(out, 1) end
-    while #out > 0 and out[#out]:match("^%s*$") do table.remove(out) end
-
+    while #out > 0 and out[1]:match("^%s*$")   do table.remove(out, 1) end
+    while #out > 0 and out[#out]:match("^%s*$") do table.remove(out)   end
     return out
 end
 
@@ -230,7 +201,6 @@ local function wrapLine(line, w)
     if #line <= w then return {line} end
     local out = {}
     while #line > w do
-        -- Try to break at space
         local cut = w
         local sp  = line:sub(1, w):match("^(.* )") or ""
         if #sp > w * 0.4 then cut = #sp end
@@ -268,32 +238,28 @@ function browser.draw(win, gpu, cx, cy, cw, ch)
     win.elements = {}
     local y = cy
 
-    -- ── Navigation bar ─────────────────────────────────────
+    -- Navigation bar
     gpu.setBackground(T.surfaceAlt)
     gpu.fill(cx, y, cw, 1, " ")
 
-    -- Back
     local hasBack = (win.histIdx > 1)
     gpu.setBackground(hasBack and T.accent or T.surfaceInset)
     gpu.setForeground(T.textOnAccent)
     gpu.set(cx, y, "[<] ")
     table.insert(win.elements, {x=cx, y=y, w=4, h=1, action="back"})
 
-    -- Forward
     local hasFwd = (win.histIdx < #win.history)
     gpu.setBackground(hasFwd and T.accent or T.surfaceInset)
     gpu.setForeground(T.textOnAccent)
     gpu.set(cx+4, y, "[>] ")
     table.insert(win.elements, {x=cx+4, y=y, w=4, h=1, action="fwd"})
 
-    -- Reload / Stop
     local reloadLabel = win.loading and "[X]" or "[R]"
     local reloadBg    = win.loading and T.danger or T.accent
     gpu.setBackground(reloadBg); gpu.setForeground(T.textOnAccent)
     gpu.set(cx+8, y, reloadLabel)
     table.insert(win.elements, {x=cx+8, y=y, w=3, h=1, action=win.loading and "stop" or "reload"})
 
-    -- URL bar
     local urlBarX = cx + 12
     local urlBarW = cw - 14
     local urlBg   = win.urlBarFocus and T.accentSubtle or T.surfaceInset
@@ -316,7 +282,7 @@ function browser.draw(win, gpu, cx, cy, cw, ch)
 
     y = cy + 1
 
-    -- ── Bookmarks bar ───────────────────────────────────────
+    -- Bookmarks bar
     gpu.setBackground(T.surfaceAlt)
     gpu.fill(cx, y, cw, 1, " ")
     local bx = cx + 1
@@ -334,7 +300,7 @@ function browser.draw(win, gpu, cx, cy, cw, ch)
 
     y = cy + 2
 
-    -- ── Status bar ──────────────────────────────────────────
+    -- Status bar
     local statusBg = win.loading and T.accentSubtle or T.surfaceAlt
     gpu.setBackground(statusBg)
     gpu.fill(cx, y, cw, 1, " ")
@@ -343,7 +309,7 @@ function browser.draw(win, gpu, cx, cy, cw, ch)
 
     y = cy + 3
 
-    -- ── Content area ────────────────────────────────────────
+    -- Content area
     local contentH = ch - 4
     local contentW = cw - 1
 
@@ -358,7 +324,6 @@ function browser.draw(win, gpu, cx, cy, cw, ch)
         local lineIdx = win.scrollY + row + 1
         local line    = wrapped[lineIdx]
         if line then
-            -- Syntax coloring
             if line:match("^==[^=]") or line:match("==$") then
                 gpu.setForeground(T.accent)
             elseif line:match("^%-%- ") or line:match("─") then
@@ -377,11 +342,10 @@ function browser.draw(win, gpu, cx, cy, cw, ch)
         end
     end
 
-    -- Scrollbar
     UI.drawScrollbar(cx + cw - 1, y, contentH,
         math.max(contentH, #wrapped), contentH, win.scrollY)
 
-    -- ── Footer ──────────────────────────────────────────────
+    -- Footer
     gpu.setBackground(T.surfaceAlt)
     gpu.fill(cx, cy + ch - 1, cw, 1, " ")
     gpu.setForeground(T.textSecondary)
@@ -396,7 +360,6 @@ end
 
 -- ============================================================
 -- TICK - Async network state machine
--- Фази: idle -> connecting -> reading -> done
 -- ============================================================
 function browser.tick(win)
     if win._phase == "idle" or not win._netHandle then
@@ -405,7 +368,6 @@ function browser.tick(win)
 
     win._timeout = win._timeout + 1
     if win._timeout > win._maxTimeout then
-        -- Global timeout
         pcall(win._netHandle.close)
         win._netHandle = nil
         win._phase     = "idle"
@@ -420,29 +382,24 @@ function browser.tick(win)
             "  Спробуйте:",
             "    * Перевірте адресу",
             "    * Переконайтесь що Internet Card встановлена",
-            "    * Сервер може бути недоступний",
         }
         win.loadStatus = "Таймаут з'єднання"
         return true
     end
 
-    -- Phase: CONNECTING
-    -- Чекаємо на response() — він повертає статус коли з'єднання встановлено
+    -- CONNECTING phase: wait for response()
     if win._phase == "connecting" then
         local ok, status, msg, headers = pcall(win._netHandle.response)
         if not ok then
-            -- Ще не підключено, або помилка
             win.loadStatus = "Підключення... " .. win._timeout .. "t"
             return false
         end
 
-        -- З'єднання встановлено!
         status = status or 200
         win._httpStatus = status
         win._phase      = "reading"
 
         if status >= 400 then
-            -- HTTP помилка
             win.loadStatus = string.format("HTTP %d %s", status, msg or "")
             win.lines = {
                 "",
@@ -450,17 +407,15 @@ function browser.tick(win)
                 "",
                 "  URL: " .. (win._netUrl or ""),
                 "",
-                "  Поради:",
-                "    " .. (status == 404 and "Сторінку не знайдено. Перевірте адресу."   or
-                           status == 403 and "Доступ заборонений."                        or
-                           status == 500 and "Внутрішня помилка сервера."                 or
-                           status == 503 and "Сервіс тимчасово недоступний."              or
-                           "Спробуйте пізніше."),
+                "  " .. (status == 404 and "Сторінку не знайдено."  or
+                         status == 403 and "Доступ заборонений."      or
+                         status == 500 and "Внутрішня помилка сервера." or
+                         "Спробуйте пізніше."),
             }
             pcall(win._netHandle.close)
-            win._netHandle  = nil
-            win._phase      = "idle"
-            win.loading     = false
+            win._netHandle = nil
+            win._phase     = "idle"
+            win.loading    = false
             browser._commitHistory(win)
             return true
         end
@@ -469,7 +424,7 @@ function browser.tick(win)
         return false
     end
 
-    -- Phase: READING
+    -- READING phase
     if win._phase == "reading" then
         local ok, chunk = pcall(win._netHandle.read, 8192)
 
@@ -481,23 +436,20 @@ function browser.tick(win)
                 win._httpStatus or 200,
                 math.floor(win._bytesRead / 1024)
             )
-            return false  -- не перемальовувати кожен чанк
+            return false
 
         elseif ok and (chunk == nil or chunk == "") then
-            -- Кінець даних
             browser._finishLoad(win)
             return true
 
         else
-            -- Помилка читання
             if win._bytesRead > 0 then
-                -- Маємо якийсь контент — завершуємо з тим що є
                 browser._finishLoad(win)
             else
-                win.loading   = false
-                win._phase    = "idle"
+                win.loading    = false
+                win._phase     = "idle"
                 win.loadStatus = "Помилка читання даних"
-                win.lines = {"", "  [Помилка] Не вдалося прочитати відповідь сервера.", ""}
+                win.lines = {"", "  [Помилка] Не вдалося прочитати відповідь.", ""}
             end
             pcall(win._netHandle.close)
             win._netHandle = nil
@@ -512,17 +464,15 @@ function browser._finishLoad(win)
     pcall(win._netHandle.close)
     win._netHandle = nil
 
-    local raw   = table.concat(win._netBuf)
+    local raw    = table.concat(win._netBuf)
+    local isHtml = raw:lower():match("<!doctype") or raw:lower():match("<html")
     local lines
 
-    -- Determine content type
-    local isHtml = raw:lower():match("<!doctype") or raw:lower():match("<html")
     if isHtml then
         lines = stripHtml(raw)
-        -- Add URL header
         table.insert(lines, 1, "")
         table.insert(lines, 1, "  URL: " .. (win._netUrl or ""))
-        table.insert(lines, 1, string.rep("─", 50))
+        table.insert(lines, 1, string.rep("-", 50))
     else
         lines = {}
         for line in (raw.."\n"):gmatch("([^\n]*)\n") do
@@ -530,7 +480,7 @@ function browser._finishLoad(win)
         end
     end
 
-    local elapsed = math.floor((computer.uptime() - (win._startTime or 0)) * 10) / 10
+    local elapsed  = math.floor((computer.uptime() - (win._startTime or 0)) * 10) / 10
     win.lines      = lines
     win.scrollY    = 0
     win.loading    = false
@@ -547,14 +497,8 @@ function browser._finishLoad(win)
 end
 
 function browser._commitHistory(win)
-    if win._historyNav then
-        win._historyNav = false
-        return
-    end
-    -- Trim forward history
-    while #win.history > win.histIdx do
-        table.remove(win.history)
-    end
+    if win._historyNav then win._historyNav = false; return end
+    while #win.history > win.histIdx do table.remove(win.history) end
     if #win.history == 0 or win.history[#win.history] ~= win._netUrl then
         table.insert(win.history, win._netUrl)
     end
@@ -568,7 +512,6 @@ function browser.navigate(win, url, isHistoryNav)
     url = (url or ""):match("^%s*(.-)%s*$")
     if url == "" then return end
 
-    -- Normalize URL
     if url == "about:home" or url == "home" then
         browser._showHome(win)
         if not isHistoryNav then
@@ -582,34 +525,25 @@ function browser.navigate(win, url, isHistoryNav)
     end
 
     if not url:match("^https?://") then
-        -- Try HTTPS first
         url = "https://" .. url
     end
 
-    -- Check internet
     if not component.isAvailable("internet") then
         win.loading    = false
         win._phase     = "idle"
         win.loadStatus = "Немає Internet Card!"
         win.lines = {
-            "",
-            "  [Помилка] Немає Internet Card",
-            "",
-            "  Для перегляду веб-сторінок потрібна Internet Card.",
-            "  Встановіть її в комп'ютер (слот CPU або плата розширення).",
-            "",
-            "  В OpenComputers: Internet Card T2 або T3",
+            "", "  [Помилка] Немає Internet Card", "",
+            "  Потрібна Internet Card T2 або T3.", "",
         }
         return
     end
 
-    -- Abort current request
     if win._netHandle then
         pcall(win._netHandle.close)
         win._netHandle = nil
     end
 
-    -- Start request
     local net = component.internet
     local ok, handle = pcall(net.request, url, nil, {
         ["User-Agent"] = "FixOS/" .. VERSION .. " (OpenComputers)",
@@ -621,15 +555,11 @@ function browser.navigate(win, url, isHistoryNav)
         win._phase     = "idle"
         win.loadStatus = "Помилка з'єднання"
         win.lines = {
-            "",
-            "  [Помилка] Не вдалося підключитися",
-            "",
-            "  URL: " .. url,
-            "",
+            "", "  [Помилка] Не вдалося підключитися", "",
+            "  URL: " .. url, "",
             "  Можливі причини:",
             "    * Неправильна адреса",
             "    * Сервер недоступний",
-            "    * Проблеми з мережею в Minecraft",
             "    * URL заблокований сервером OC",
         }
         return
@@ -645,12 +575,13 @@ function browser.navigate(win, url, isHistoryNav)
     win._httpStatus = nil
     win._startTime  = computer.uptime()
     win.loading     = true
-    win.loadStatus  = "Підключення до " .. url:match("https?://([^/]+)") or url
-    win.lines       = {
-        "",
-        "  Завантаження: " .. url,
-        "",
-        "  Будь ласка, зачекайте...",
+
+    -- FIX: url:match() can return nil for unusual URLs; wrap in (...or url)
+    -- so that string concatenation never receives nil.
+    win.loadStatus  = "Підключення до " .. (url:match("https?://([^/]+)") or url)
+
+    win.lines = {
+        "", "  Завантаження: " .. url, "", "  Будь ласка, зачекайте...",
     }
     win.scrollY = 0
 end
@@ -664,32 +595,25 @@ function browser.click(win, clickX, clickY, btn)
 
     for _, elem in ipairs(win.elements) do
         if UI.hitTest(elem, clickX, clickY) then
-
             if elem.action == "urlbar" then
                 win.urlBarFocus = true
                 win.urlInput    = win.url
                 return true
-
             elseif elem.action == "back" then
                 if win.histIdx > 1 then
                     win.histIdx = win.histIdx - 1
-                    local u = win.history[win.histIdx]
-                    browser.navigate(win, u, true)
+                    browser.navigate(win, win.history[win.histIdx], true)
                 end
                 return true
-
             elseif elem.action == "fwd" then
                 if win.histIdx < #win.history then
                     win.histIdx = win.histIdx + 1
-                    local u = win.history[win.histIdx]
-                    browser.navigate(win, u, true)
+                    browser.navigate(win, win.history[win.histIdx], true)
                 end
                 return true
-
             elseif elem.action == "reload" then
                 browser.navigate(win, win.url, true)
                 return true
-
             elseif elem.action == "stop" then
                 if win._netHandle then
                     pcall(win._netHandle.close)
@@ -699,7 +623,6 @@ function browser.click(win, clickX, clickY, btn)
                 win._phase     = "idle"
                 win.loadStatus = "Зупинено"
                 return true
-
             elseif elem.action == "bookmark" then
                 win.urlBarFocus = false
                 browser.navigate(win, elem.url, false)
@@ -719,7 +642,6 @@ end
 -- KEY
 -- ============================================================
 function browser.key(win, char, code)
-    -- U = URL bar
     if not win.urlBarFocus and (char == 117 or char == 85) then
         win.urlBarFocus = true
         win.urlInput    = win.url
@@ -727,20 +649,20 @@ function browser.key(win, char, code)
     end
 
     if win.urlBarFocus then
-        if code == 28 then           -- Enter -> navigate
+        if code == 28 then
             local url       = win.urlInput
             win.urlBarFocus = false
             browser.navigate(win, url, false)
             return true
-        elseif code == 1 then        -- Escape
+        elseif code == 1 then
             win.urlBarFocus = false
             return true
-        elseif code == 14 then       -- Backspace
+        elseif code == 14 then
             if #win.urlInput > 0 then
                 win.urlInput = win.urlInput:sub(1, -2)
                 return true
             end
-        elseif code == 199 then      -- Home
+        elseif code == 199 then
             win.urlInput = ""
             return true
         elseif char and char >= 32 and char <= 126 then
@@ -748,14 +670,12 @@ function browser.key(win, char, code)
             return true
         end
     else
-        -- Scroll
-        if     code == 200 then win.scrollY = math.max(0, win.scrollY - 1); return true
-        elseif code == 208 then win.scrollY = win.scrollY + 1; return true
+        if     code == 200 then win.scrollY = math.max(0, win.scrollY - 1);  return true
+        elseif code == 208 then win.scrollY = win.scrollY + 1;               return true
         elseif code == 201 then win.scrollY = math.max(0, win.scrollY - 10); return true
-        elseif code == 209 then win.scrollY = win.scrollY + 10; return true
-        elseif code == 199 then win.scrollY = 0; return true
-        elseif code == 207 then win.scrollY = 99999; return true
-        -- Alt+Left / Alt+Right = back/forward
+        elseif code == 209 then win.scrollY = win.scrollY + 10;              return true
+        elseif code == 199 then win.scrollY = 0;                             return true
+        elseif code == 207 then win.scrollY = 99999;                         return true
         elseif code == 203 and win.histIdx > 1 then
             win.histIdx = win.histIdx - 1
             browser.navigate(win, win.history[win.histIdx], true)

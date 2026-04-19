@@ -1,9 +1,8 @@
 -- ==========================================================
--- FixOS 3.2.2 - system/ui.lua
--- FIXES 3.2.2:
---   - Shadow COMPLETELY REMOVED (no frames behind windows)
---   - Button shadow REMOVED (clean solid buttons)
---   - All drawing is clean and crisp
+-- FixOS 4.0.1 - system/ui.lua
+-- FIXES 4.0.1:
+--   - drawButton: h=1 buttons no longer place label outside bounds
+--     (topBar accent stripe is suppressed when h=1)
 -- ==========================================================
 
 local UI = {}
@@ -62,6 +61,7 @@ function UI.init(gpuProxy)
     _gpu = gpuProxy
 end
 
+-- ── Unicode-aware string helpers ──────────────────────────────
 local function ulen(s)
     s = tostring(s)
     if unicode and unicode.len then return unicode.len(s) end
@@ -96,21 +96,17 @@ function UI.centerText(x, y, width, str, fg, bg)
     _gpu.set(x + ox, y, str)
 end
 
--- FIX: Shadow is now a NO-OP (completely disabled)
-function UI.shadow(x, y, w, h, depth)
-    -- Intentionally empty - no shadows drawn
-end
+-- No-op shadow (intentionally disabled)
+function UI.shadow(x, y, w, h, depth) end
 
--- FIX: Window drawing with NO shadow, clean borders
+-- ── Window ───────────────────────────────────────────────────
 function UI.drawWindow(x, y, w, h, title, focused)
     if focused == nil then focused = true end
     local P = UI.PADDING
 
-    -- Body (NO shadow call)
     _gpu.setBackground(UI.Theme.surface)
     _gpu.fill(x, y, w, h, " ")
 
-    -- Title bar
     local titleBg = focused and UI.Theme.accent or UI.Theme.chromeMid
     _gpu.setBackground(titleBg)
     _gpu.fill(x, y, w, 1, " ")
@@ -129,20 +125,17 @@ function UI.drawWindow(x, y, w, h, title, focused)
     _gpu.setForeground(UI.Theme.textOnAccent)
     _gpu.set(cx0 + 6, y, " X ")
 
-    -- Divider below title
     _gpu.setForeground(UI.Theme.borderSubtle)
     _gpu.setBackground(UI.Theme.surface)
     for col = 0, w - 1 do
         _gpu.set(x + col, y + 1, "\xE2\x94\x80")
     end
 
-    -- Side borders
     for row = 2, h - 2 do
         _gpu.set(x,         y + row, "\xE2\x94\x82")
         _gpu.set(x + w - 1, y + row, "\xE2\x94\x82")
     end
 
-    -- Bottom border
     _gpu.set(x,         y + h - 1, "\xE2\x94\x94")
     _gpu.set(x + w - 1, y + h - 1, "\xE2\x94\x98")
     for col = 1, w - 2 do
@@ -156,7 +149,7 @@ function UI.drawWindow(x, y, w, h, title, focused)
     return clientX, clientY, clientW, clientH
 end
 
--- Scrollbar
+-- ── Scrollbar ─────────────────────────────────────────────────
 function UI.drawScrollbar(x, y, h, total, visible, offset)
     if total <= visible or h < 2 then return end
     local T = UI.Theme
@@ -170,7 +163,9 @@ function UI.drawScrollbar(x, y, h, total, visible, offset)
     _gpu.fill(x, y + thumbY, 1, thumbH, " ")
 end
 
--- FIX: Button with NO shadow underneath (clean solid button)
+-- ── Button ────────────────────────────────────────────────────
+-- FIX: When h == 1, topBar stripe is suppressed so the label is
+--      not placed at y+1 (outside the button bounds).
 function UI.drawButton(x, y, w, h, label, style, enabled)
     style   = style   or "accent"
     enabled = (enabled == nil) and true or enabled
@@ -194,24 +189,28 @@ function UI.drawButton(x, y, w, h, label, style, enabled)
         bg, fg, topBar = UI.Theme.accent,     UI.Theme.textOnAccent, UI.Theme.accentDark
     end
 
-    -- NO SHADOW - just draw the button solid
+    -- Fill base background
     _gpu.setBackground(bg)
     _gpu.fill(x, y, w, h, " ")
 
-    -- Top accent bar (1px stripe at top)
-    if topBar then
+    -- Top accent stripe — only drawn when there is a body row below it (h > 1).
+    -- If h == 1, the stripe would consume the only row and push the label off-screen.
+    if topBar and h > 1 then
         _gpu.setBackground(topBar)
         _gpu.fill(x, y, w, 1, " ")
     end
 
-    -- Centered label
+    -- Label row: centre of button; if topBar is drawn, stay in the body (>=y+1).
     local labelRow = y + math.floor(h / 2)
-    if topBar then labelRow = y + math.max(1, math.floor(h / 2)) end
+    if topBar and h > 1 then
+        labelRow = y + math.max(1, math.floor(h / 2))
+    end
     UI.centerText(x, labelRow, w, label, fg, bg)
 
     return { x = x, y = y, w = w, h = h }
 end
 
+-- ── Progress bar ──────────────────────────────────────────────
 function UI.drawProgressBar(x, y, w, percent, barColor)
     percent  = math.max(0, math.min(1, percent or 0))
     barColor = barColor or UI.Theme.accent
@@ -240,6 +239,7 @@ function UI.drawProgressBar(x, y, w, percent, barColor)
     _gpu.set(lx, y, pct)
 end
 
+-- ── Card ──────────────────────────────────────────────────────
 function UI.drawCard(x, y, w, h, headerText, headerColor)
     headerColor = headerColor or UI.Theme.accent
 
@@ -271,6 +271,7 @@ function UI.drawCard(x, y, w, h, headerText, headerColor)
     return x + P + 1, y + 1, w - (P + 1) * 2, h - 2
 end
 
+-- ── Tile ──────────────────────────────────────────────────────
 function UI.drawTile(x, y, label, icon, color, hover)
     color = color or UI.Theme.tileBlue
     local W, H = UI.TILE_W, UI.TILE_H
@@ -305,6 +306,7 @@ function UI.drawTile(x, y, label, icon, color, hover)
     return { x = x, y = y, w = W, h = H }
 end
 
+-- ── Start-menu grid ───────────────────────────────────────────
 function UI.drawStartMenuGrid(originX, originY, tiles)
     local hits = {}
     local col, row = 0, 0
@@ -320,6 +322,7 @@ function UI.drawStartMenuGrid(originX, originY, tiles)
     return hits
 end
 
+-- ── Tab bar ───────────────────────────────────────────────────
 function UI.drawTabBar(x, y, totalWidth, tabs, activeIndex)
     local n     = #tabs
     local baseW = math.floor(totalWidth / n)
@@ -341,6 +344,7 @@ function UI.drawTabBar(x, y, totalWidth, tabs, activeIndex)
     return hits
 end
 
+-- ── Status banner ─────────────────────────────────────────────
 function UI.drawStatusBanner(x, y, w, message, status)
     local bgMap   = { success=UI.Theme.success, warning=UI.Theme.warning,
                       danger=UI.Theme.danger,   info=UI.Theme.info }
@@ -355,6 +359,7 @@ function UI.drawStatusBanner(x, y, w, message, status)
     _gpu.set(x + UI.PADDING, y, msg)
 end
 
+-- ── Divider ───────────────────────────────────────────────────
 function UI.drawDivider(x, y, w, color)
     _gpu.setForeground(color or UI.Theme.divider)
     _gpu.setBackground(UI.Theme.surface)
@@ -363,6 +368,7 @@ function UI.drawDivider(x, y, w, color)
     end
 end
 
+-- ── Spinner ───────────────────────────────────────────────────
 function UI.spinner(x, y, frame, color, bg)
     local frames = { "|", "/", "-", "\\", "|", "/", "-", "\\" }
     _gpu.setForeground(color or UI.Theme.accent)
@@ -370,6 +376,7 @@ function UI.spinner(x, y, frame, color, bg)
     _gpu.set(x, y, frames[(frame % #frames) + 1])
 end
 
+-- ── Hit-test ──────────────────────────────────────────────────
 function UI.hitTest(rect, mx, my)
     return mx >= rect.x
        and mx <  rect.x + rect.w
@@ -377,6 +384,7 @@ function UI.hitTest(rect, mx, my)
        and my <  rect.y + rect.h
 end
 
+-- ── Clear screen ─────────────────────────────────────────────
 function UI.clearScreen(screenW, screenH, bg)
     _gpu.setBackground(bg or UI.Theme.surface)
     _gpu.fill(1, 1, screenW, screenH, " ")
