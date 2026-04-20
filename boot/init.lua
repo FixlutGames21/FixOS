@@ -1,6 +1,6 @@
 -- ==============================================
--- FixOS 3.0 - boot/init.lua
--- Bootloader для OpenComputers
+-- FixOS 4.0.1 - boot/init.lua
+-- Bootloader for OpenComputers
 -- ==============================================
 
 local function safeInvoke(addr, method, ...)
@@ -11,7 +11,7 @@ local function safeInvoke(addr, method, ...)
   return nil
 end
 
-local gpu_addr = component.list("gpu", true)()
+local gpu_addr    = component.list("gpu",    true)()
 local screen_addr = component.list("screen", true)()
 
 local currentY = 1
@@ -24,21 +24,21 @@ end
 
 if gpu_addr and screen_addr then
   safeInvoke(gpu_addr, "bind", screen_addr)
-  
+
   local maxW, maxH = safeInvoke(gpu_addr, "maxResolution")
   if maxW and maxH then
     local w = math.min(80, maxW)
     local h = math.min(25, maxH)
     safeInvoke(gpu_addr, "setResolution", w, h)
   end
-  
+
   safeInvoke(gpu_addr, "setBackground", 0x000000)
   safeInvoke(gpu_addr, "setForeground", 0x00FF00)
   safeInvoke(gpu_addr, "fill", 1, 1, 80, 25, " ")
-  
-  safeInvoke(gpu_addr, "set", 2, 1, "FixOS 3.0 - Booting...")
+
+  safeInvoke(gpu_addr, "set", 2, 1, "FixOS 4.0.1 - Booting...")
   currentY = 3
-  
+
   computer.beep(400, 0.1)
 end
 
@@ -74,20 +74,18 @@ component_api.doc     = component.doc
 function component_api.proxy(address)
   local t = component.type(address)
   if not t then return nil, "no such component" end
-  
+
   local proxy = {address = address, type = t}
   for method in pairs(component.methods(address)) do
     proxy[method] = function(...)
       return component.invoke(address, method, ...)
     end
   end
-  
+
   return proxy
 end
 
--- FIX: proper partial-address matching
 function component_api.get(address, componentType)
-  -- exact match first
   local t = component.type(address)
   if t then
     if componentType == nil or t == componentType then
@@ -95,7 +93,6 @@ function component_api.get(address, componentType)
     end
     return nil, "component type mismatch"
   end
-  -- partial match (short UUID prefix)
   for addr in component.list(componentType or "") do
     if addr:sub(1, #address) == address then
       return addr
@@ -113,7 +110,7 @@ _G.component = component_api
 bootPrint("Mounting filesystem...")
 
 local boot_fs_addr = computer.getBootAddress()
-local boot_fs = component_api.proxy(boot_fs_addr)
+local boot_fs      = component_api.proxy(boot_fs_addr)
 
 if not boot_fs then
   error("Cannot access boot filesystem!")
@@ -123,12 +120,12 @@ local function loadfile_raw(path)
   if not boot_fs.exists(path) then
     return nil, "file not found: " .. path
   end
-  
+
   local handle = boot_fs.open(path, "r")
   if not handle then
     return nil, "cannot open: " .. path
   end
-  
+
   local data = ""
   repeat
     local chunk = boot_fs.read(handle, math.huge)
@@ -136,14 +133,14 @@ local function loadfile_raw(path)
       data = data .. chunk
     end
   until not chunk
-  
+
   boot_fs.close(handle)
-  
+
   local func, err = load(data, "=" .. path, "bt", _G)
   if not func then
     return nil, "syntax error: " .. tostring(err)
   end
-  
+
   return func
 end
 
@@ -166,26 +163,26 @@ _G.require = function(name)
   if loaded[name] then
     return loaded[name]
   end
-  
+
   local paths = {
-    "/lib/" .. name .. ".lua",
-    "/lib/" .. name:gsub("%.", "/") .. ".lua",
-    "/system/lib/" .. name .. ".lua"
+    "/lib/"        .. name .. ".lua",
+    "/lib/"        .. name:gsub("%.", "/") .. ".lua",
+    "/system/lib/" .. name .. ".lua",
   }
-  
+
   for _, path in ipairs(paths) do
     if boot_fs.exists(path) then
       local func, err = loadfile(path)
       if not func then
         error("Error loading module '" .. name .. "': " .. tostring(err))
       end
-      
+
       local result = func()
       loaded[name] = result or true
       return loaded[name]
     end
   end
-  
+
   error("module '" .. name .. "' not found")
 end
 
@@ -198,7 +195,6 @@ _G.os.sleep = function(seconds)
   until computer.uptime() >= deadline
 end
 
--- FIX: support %H:%M, %H:%M:%S and fallback
 _G.os.date = function(format, time)
   time = time or os.time()
   local hours   = math.floor((time / 3600) % 24)
@@ -206,20 +202,28 @@ _G.os.date = function(format, time)
   local seconds = math.floor(time          % 60)
 
   if format == "*t" then
-    return { hour = hours, min = minutes, sec = seconds,
-             year = 2000, month = 1, day = 1,
-             wday = 1, yday = 1, isdst = false }
+    return {
+      hour  = hours,
+      min   = minutes,
+      sec   = seconds,
+      year  = 2000,
+      month = 1,
+      day   = 1,
+      wday  = 1,
+      yday  = 1,
+      isdst = false,
+    }
   end
 
-  -- Replace tokens manually so any combination works
   local result = tostring(format)
-  result = result:gsub("%%H",  string.format("%02d", hours))
-  result = result:gsub("%%M",  string.format("%02d", minutes))
-  result = result:gsub("%%S",  string.format("%02d", seconds))
-  -- If no tokens were replaced (unknown format) fall back to timestamp
+  result = result:gsub("%%H", string.format("%02d", hours))
+  result = result:gsub("%%M", string.format("%02d", minutes))
+  result = result:gsub("%%S", string.format("%02d", seconds))
+
   if result == tostring(format) and not format:find("%%[HMS]") then
     result = tostring(time)
   end
+
   return result
 end
 
@@ -246,7 +250,6 @@ if not ok then
     boot_fs.write(handle, "Desktop error: " .. tostring(run_err))
     boot_fs.close(handle)
   end
-  
   error("Desktop crashed: " .. tostring(run_err))
 end
 
