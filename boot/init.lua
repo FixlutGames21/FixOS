@@ -1,284 +1,399 @@
--- FixOS 4.0.1 - init.lua
--- Повна переробка: чистий, надійний, без ризику обрізання (STABLE BUILD)
+-- =================================================================
+-- FixOS 4.0.2 - init.lua
+-- Повністю переписаний для OpenComputers
+--
+-- КРИТИЧНІ ПРАВИЛА OC які раніше порушувались:
+--   1. НЕ перевизначати _G.error через shutdown() -- це і давало
+--      "computer halted" замість нормального повідомлення
+--   2. component.list() повертає ітератор, не масив
+--   3. pcall треба скрізь де є fs/gpu виклики
+--   4. os.sleep потрібен свій, бо OC не має os до init
+-- =================================================================
 
--- ============================================================
--- КРОК 0: Гарантована ініціалізація component API
--- ============================================================
-local component = _G.component
+-- -----------------------------------------------------------------
+-- 0. Отримати GPU та Screen ОДРАЗУ (без зайвих оберток)
+-- -----------------------------------------------------------------
+local gpuAddr, screenAddr
 
-if not component then
-  local ok, lib = pcall(require, "component")
-  if ok and lib then
-    component = lib
-    _G.component = lib
-  end
-end
+for a in component.list("gpu")    do gpuAddr    = a; break end
+for a in component.list("screen") do screenAddr = a; break end
 
-if not component or not component.invoke then
-  computer.beep(100, 1)
-  error("FATAL: component API not available at boot")
-end
-
--- ============================================================
--- КРОК 1: Безпечний виклик компонентів
--- ============================================================
-local function safeCall(addr, method, ...)
-  if not component or not component.invoke then return nil end
-  local ok, a, b, c, d = pcall(component.invoke, addr, method, ...)
-  if ok then return a, b, c, d end
-  return nil
-end
-
--- ============================================================
--- КРОК 2: Знайти GPU та Screen
--- ============================================================
-local gpuAddr    = component.list("gpu",    true)()
-local screenAddr = component.list("screen", true)()
-
--- ============================================================
--- КРОК 3: Консоль для виводу повідомлень
--- ============================================================
-local consoleY = 1
-
-local function consolePrint(msg)
-  if gpuAddr and screenAddr then
-    safeCall(gpuAddr, "set", 2, consoleY, tostring(msg))
-    consoleY = consoleY + 1
-  end
-end
-
-local function consoleClear()
-  if gpuAddr and screenAddr then
-    safeCall(gpuAddr, "fill", 1, 1, 80, 25, " ")
-    consoleY = 1
-  end
-end
-
--- ============================================================
--- КРОК 4: Ініціалізація екрану
--- ============================================================
+-- Прив'язати GPU до екрану
 if gpuAddr and screenAddr then
-  safeCall(gpuAddr, "bind", screenAddr)
-
-  local maxW, maxH = safeCall(gpuAddr, "maxResolution")
-  if maxW and maxH then
-    safeCall(gpuAddr, "setResolution", math.min(80, maxW), math.min(25, maxH))
-  end
-
-  safeCall(gpuAddr, "setBackground", 0x000000)
-  safeCall(gpuAddr, "setForeground", 0x00FF00)
-  consoleClear()
-
-  safeCall(gpuAddr, "set", 2, 1, "FixOS 4.0.1 - Bootloader")
-  safeCall(gpuAddr, "set", 2, 2, string.rep("-", 40))
-  consoleY = 4
-
-  computer.beep(440, 0.05)
-end
-
--- ============================================================
--- КРОК 5: print
--- ============================================================
-_G.print = function(...)
-  local t = {...}
-  local s = ""
-  for i = 1, #t do
-    s = s .. tostring(t[i]) .. (i < #t and "  " or "")
-  end
-  consolePrint(s)
-end
-
--- ============================================================
--- КРОК 6: error
--- ============================================================
-_G.error = function(msg)
-  if gpuAddr and screenAddr then
-    safeCall(gpuAddr, "setBackground", 0x0000CC)
-    safeCall(gpuAddr, "setForeground", 0xFFFFFF)
-    safeCall(gpuAddr, "fill", 1, 1, 80, 25, " ")
-    safeCall(gpuAddr, "set", 28, 10, "Unrecoverable Error")
-    safeCall(gpuAddr, "set", 5,  12, tostring(msg))
-  end
-  computer.beep(200, 0.5)
-  computer.pullSignal(10)
-  computer.shutdown()
-end
-
--- ============================================================
--- КРОК 7: Component API wrapper
--- ============================================================
-consolePrint("Initializing component API...")
-
-local _rawComponent = component
-if not _rawComponent then
-  _G.error("Component API lost")
-end
-
-local comp = {}
-comp.list    = _rawComponent.list
-comp.type    = _rawComponent.type
-comp.slot    = _rawComponent.slot
-comp.methods = _rawComponent.methods
-comp.invoke  = _rawComponent.invoke
-comp.doc     = _rawComponent.doc
-
-function comp.proxy(address)
-  if not address then return nil end
-  local t = _rawComponent.type(address)
-  if not t then return nil end
-  local p = { address = address, type = t }
-
-  for name in pairs(_rawComponent.methods(address) or {}) do
-    p[name] = function(...)
-      return _rawComponent.invoke(address, name, ...)
+    pcall(component.invoke, gpuAddr, "bind", screenAddr)
+    local ok, mw, mh = pcall(component.invoke, gpuAddr, "maxResolution")
+    if ok and mw then
+        pcall(component.invoke, gpuAddr, "setResolution",
+              math.min(80, mw), math.min(25, mh))
     end
-  end
-
-  return p
+    pcall(component.invoke, gpuAddr, "setBackground", 0x000000)
+    pcall(component.invoke, gpuAddr, "setForeground",  0x00FF00)
+    pcall(component.invoke, gpuAddr, "fill", 1, 1, 80, 25, " ")
 end
 
-function comp.isAvailable(typeName)
-  return _rawComponent.list(typeName)() ~= nil
+-- -----------------------------------------------------------------
+-- 1. Мінімальний вивід на екран
+-- -----------------------------------------------------------------
+local row = 1
+
+local function put(msg)
+    if gpuAddr then
+        pcall(component.invoke, gpuAddr, "set", 2, row, tostring(msg))
+        row = row + 1
+    end
 end
 
-_G.component = comp
+put("FixOS 4.0.2 - init.lua")
+put("------------------------")
 
--- ============================================================
--- КРОК 8: Boot filesystem
--- ============================================================
-consolePrint("Mounting boot filesystem...")
+-- -----------------------------------------------------------------
+-- 2. os.sleep (потрібен раніше за все інше)
+-- -----------------------------------------------------------------
+local function sleep(sec)
+    local t = computer.uptime() + (sec or 0)
+    repeat computer.pullSignal(t - computer.uptime())
+    until computer.uptime() >= t
+end
+
+-- -----------------------------------------------------------------
+-- 3. Функція критичної помилки
+--    НЕ викликає computer.shutdown() -- це давало "computer halted"
+--    Просто малює BSoD і чекає, потім дає OC показати помилку
+-- -----------------------------------------------------------------
+local function bsod(msg)
+    msg = tostring(msg or "unknown error")
+
+    -- Намалювати синій екран
+    pcall(function()
+        pcall(component.invoke, gpuAddr, "setBackground", 0x0000AA)
+        pcall(component.invoke, gpuAddr, "setForeground",  0xFFFFFF)
+        pcall(component.invoke, gpuAddr, "fill", 1, 1, 80, 25, " ")
+        pcall(component.invoke, gpuAddr, "set", 2,  4, "FixOS 4.0.2 - Boot Error")
+        pcall(component.invoke, gpuAddr, "set", 2,  6, "Error:")
+        -- Розбити повідомлення на рядки по 76 символів
+        local line, r = 7, msg
+        while #r > 0 do
+            pcall(component.invoke, gpuAddr, "set", 4, line, r:sub(1, 74))
+            r = r:sub(75)
+            line = line + 1
+            if line > 18 then break end
+        end
+        pcall(component.invoke, gpuAddr, "set", 2, 20, "Check /crash.log on boot disk.")
+        pcall(component.invoke, gpuAddr, "set", 2, 22, "Press any key to reboot.")
+    end)
+
+    -- Зберегти crash.log
+    pcall(function()
+        local bAddr = computer.getBootAddress()
+        if bAddr then
+            local h = component.invoke(bAddr, "open", "/crash.log", "w")
+            if h then
+                component.invoke(bAddr, "write", h, "CRASH: " .. msg .. "\n")
+                component.invoke(bAddr, "close", h)
+            end
+        end
+    end)
+
+    pcall(computer.beep, 150, 0.5)
+    computer.pullSignal(15) -- чекати 15 сек або натискання клавіші
+    computer.shutdown(true) -- перезавантажити
+end
+
+-- -----------------------------------------------------------------
+-- 4. Boot filesystem
+-- -----------------------------------------------------------------
+put("Mounting boot FS...")
 
 local bootAddr = computer.getBootAddress()
 if not bootAddr then
-  _G.error("No boot address")
+    bsod("computer.getBootAddress() returned nil")
 end
 
-local bootFS = comp.proxy(bootAddr)
-if not bootFS then
-  _G.error("Cannot access boot FS")
+-- Перевіряємо що FS відповідає
+local fsOk, fsTest = pcall(component.invoke, bootAddr, "exists", "/")
+if not fsOk or not fsTest then
+    bsod("Boot filesystem not accessible: " .. tostring(bootAddr))
 end
 
--- ============================================================
--- КРОК 9: loadfile / dofile
--- ============================================================
-local function readFile(path)
-  if not bootFS.exists(path) then
-    return nil, "not found: " .. path
-  end
-
-  local h = bootFS.open(path, "r")
-  if not h then return nil, "open fail: " .. path end
-
-  local data = {}
-  while true do
-    local chunk = bootFS.read(h, 4096)
-    if not chunk then break end
-    data[#data+1] = chunk
-  end
-
-  bootFS.close(h)
-  return table.concat(data)
+-- Локальні виклики FS через component.invoke напряму (без proxy)
+local function fsExists(path)
+    local ok, r = pcall(component.invoke, bootAddr, "exists", path)
+    return ok and r
 end
 
-local function loadfile_impl(path)
-  local src, err = readFile(path)
-  if not src then return nil, err end
-
-  local fn, e = load(src, "="..path, "bt", _G)
-  if not fn then return nil, e end
-
-  return fn
+local function fsOpen(path, mode)
+    local ok, h = pcall(component.invoke, bootAddr, "open", path, mode or "r")
+    if ok and h then return h end
+    return nil
 end
 
-_G.loadfile = loadfile_impl
-_G.dofile = function(p)
-  local f, e = loadfile_impl(p)
-  if not f then _G.error(e) end
-  return f()
+local function fsRead(h, n)
+    local ok, d = pcall(component.invoke, bootAddr, "read", h, n or math.huge)
+    if ok then return d end
+    return nil
 end
 
--- ============================================================
--- КРОК 10: require
--- ============================================================
-consolePrint("Setting up require...")
+local function fsWrite(h, data)
+    pcall(component.invoke, bootAddr, "write", h, data)
+end
 
-local loaded = {}
+local function fsClose(h)
+    pcall(component.invoke, bootAddr, "close", h)
+end
+
+local function fsMkdir(path)
+    pcall(component.invoke, bootAddr, "makeDirectory", path)
+end
+
+-- -----------------------------------------------------------------
+-- 5. loadfile / dofile
+-- -----------------------------------------------------------------
+put("Setting up loader...")
+
+local function myLoadfile(path)
+    if not fsExists(path) then
+        return nil, "file not found: " .. path
+    end
+
+    local h = fsOpen(path, "r")
+    if not h then
+        return nil, "cannot open: " .. path
+    end
+
+    local parts = {}
+    while true do
+        local chunk = fsRead(h, 4096)
+        if not chunk then break end
+        parts[#parts + 1] = chunk
+    end
+    fsClose(h)
+
+    local src = table.concat(parts)
+    if #src == 0 then
+        return nil, "file is empty: " .. path
+    end
+
+    local fn, err = load(src, "=" .. path, "bt", _G)
+    if not fn then
+        return nil, "compile error in " .. path .. ": " .. tostring(err)
+    end
+
+    return fn
+end
+
+_G.loadfile = myLoadfile
+
+_G.dofile = function(path)
+    local fn, err = myLoadfile(path)
+    if not fn then
+        bsod("dofile(" .. tostring(path) .. "): " .. tostring(err))
+        return -- bsod перезавантажить, але на всяк випадок
+    end
+    local ok, result = pcall(fn)
+    if not ok then
+        bsod("runtime error in " .. tostring(path) .. ": " .. tostring(result))
+        return
+    end
+    return result
+end
+
+-- -----------------------------------------------------------------
+-- 6. require
+-- -----------------------------------------------------------------
+put("Setting up require...")
+
+local _loaded = {}
+_G.package = { loaded = _loaded, path = "/lib/?.lua" }
 
 _G.require = function(name)
-  if loaded[name] then return loaded[name] end
-
-  local paths = {
-    "/lib/"..name..".lua",
-    "/lib/"..name:gsub("%.","/")..".lua",
-    "/system/lib/"..name..".lua",
-    "/system/lib/"..name:gsub("%.","/")..".lua"
-  }
-
-  for _,p in ipairs(paths) do
-    if bootFS.exists(p) then
-      local f = loadfile_impl(p)
-      local r = f()
-      loaded[name] = r or true
-      return loaded[name]
+    if _loaded[name] ~= nil then
+        return _loaded[name]
     end
-  end
 
-  _G.error("module not found: "..name)
+    local paths = {
+        "/lib/"        .. name .. ".lua",
+        "/lib/"        .. name:gsub("%.", "/") .. ".lua",
+        "/system/lib/" .. name .. ".lua",
+    }
+
+    for _, p in ipairs(paths) do
+        if fsExists(p) then
+            local fn, err = myLoadfile(p)
+            if not fn then
+                bsod("require('" .. name .. "'): " .. tostring(err))
+                return nil
+            end
+            local ok, val = pcall(fn)
+            if not ok then
+                bsod("require run('" .. name .. "'): " .. tostring(val))
+                return nil
+            end
+            _loaded[name] = (val ~= nil) and val or true
+            return _loaded[name]
+        end
+    end
+
+    -- Не знайшли -- НЕ викликаємо bsod, повертаємо nil
+    -- (деякі модулі опціональні)
+    return nil
 end
 
--- ============================================================
--- КРОК 11: os API
--- ============================================================
-consolePrint("Building os API...")
+-- -----------------------------------------------------------------
+-- 7. component API (розширений wrapper)
+-- -----------------------------------------------------------------
+put("Building component API...")
 
-_G.os = {}
+-- Зберегти оригінал ПЕРЕД заміною
+local _rawComp = component
 
-function os.sleep(s)
-  local t = computer.uptime() + (s or 0)
-  repeat
-    computer.pullSignal(t - computer.uptime())
-  until computer.uptime() >= t
+local newComp = {}
+newComp.list    = _rawComp.list
+newComp.type    = _rawComp.type
+newComp.slot    = _rawComp.slot
+newComp.methods = _rawComp.methods
+newComp.invoke  = _rawComp.invoke
+newComp.doc     = _rawComp.doc
+
+function newComp.proxy(addr)
+    if not addr then return nil end
+    local t
+    local ok, r = pcall(_rawComp.type, addr)
+    if ok then t = r end
+    if not t then return nil end
+
+    local proxy = { address = addr, type = t }
+
+    local ok2, methods = pcall(_rawComp.methods, addr)
+    if ok2 and methods then
+        for name in pairs(methods) do
+            local n = name -- closure capture
+            proxy[n] = function(...)
+                return _rawComp.invoke(addr, n, ...)
+            end
+        end
+    end
+
+    return proxy
 end
 
-function os.clock()
-  return computer.uptime()
+function newComp.get(partial, wantType)
+    for addr in _rawComp.list(wantType or "") do
+        if addr:sub(1, #partial) == partial then
+            return addr
+        end
+    end
+    return nil
 end
 
-function os.time()
-  return math.floor(computer.uptime())
+function newComp.isAvailable(typeName)
+    -- list повертає ітератор; перша ітерація дає результат або nil
+    return _rawComp.list(typeName)() ~= nil
 end
 
--- ============================================================
--- КРОК 12: Перевірка файлів
--- ============================================================
-consolePrint("Checking system files...")
+_G.component = newComp
 
-if not bootFS.exists("/system/desktop.lua") then
-  _G.error("Missing desktop.lua")
+-- -----------------------------------------------------------------
+-- 8. os API
+-- -----------------------------------------------------------------
+put("Building os API...")
+
+_G.os = {
+    sleep = sleep,
+
+    time = function()
+        return math.floor(computer.uptime())
+    end,
+
+    clock = function()
+        return computer.uptime()
+    end,
+
+    date = function(fmt, t)
+        t   = tonumber(t) or computer.uptime()
+        fmt = tostring(fmt or "%H:%M:%S")
+
+        local h = math.floor(t / 3600) % 24
+        local m = math.floor(t / 60)   % 60
+        local s = math.floor(t)        % 60
+
+        if fmt == "*t" then
+            return {
+                year=2000, month=1, day=1,
+                hour=h, min=m, sec=s,
+                wday=1, yday=1, isdst=false
+            }
+        end
+
+        local r = fmt
+        r = r:gsub("%%H", string.format("%02d", h))
+        r = r:gsub("%%M", string.format("%02d", m))
+        r = r:gsub("%%S", string.format("%02d", s))
+        return r
+    end,
+
+    exit = function()
+        computer.shutdown()
+    end,
+}
+
+-- -----------------------------------------------------------------
+-- 9. print (офіційний, після os)
+-- -----------------------------------------------------------------
+_G.print = function(...)
+    local t = {...}
+    local parts = {}
+    for i = 1, #t do parts[i] = tostring(t[i]) end
+    put(table.concat(parts, "\t"))
 end
 
--- ============================================================
--- КРОК 13: Запуск Desktop
--- ============================================================
-consolePrint("Launching desktop...")
-os.sleep(0.2)
+-- -----------------------------------------------------------------
+-- 10. Перевірка критичних файлів
+-- -----------------------------------------------------------------
+put("Checking system files...")
 
-local fn, err = loadfile_impl("/system/desktop.lua")
-if not fn then _G.error(err) end
+local criticalFiles = {
+    "/system/ui.lua",
+    "/system/desktop.lua",
+    "/system/lang.lua",
+}
 
-local ok, crash = pcall(fn)
+for _, f in ipairs(criticalFiles) do
+    if not fsExists(f) then
+        bsod("Missing system file: " .. f ..
+             "\nPlease reinstall FixOS using installer.lua")
+    end
+end
+
+put("All files OK.")
+
+-- -----------------------------------------------------------------
+-- 11. Запуск desktop
+-- -----------------------------------------------------------------
+put("Starting desktop...")
+sleep(0.3)
+
+local desktopFn, desktopErr = myLoadfile("/system/desktop.lua")
+if not desktopFn then
+    bsod("Cannot load desktop.lua:\n" .. tostring(desktopErr))
+end
+
+local ok, runErr = pcall(desktopFn)
+
 if not ok then
-  local h = bootFS.open("/crash.log", "w")
-  if h then
-    bootFS.write(h, crash)
-    bootFS.close(h)
-  end
-  _G.error(crash)
+    -- Зберегти crash.log з повним traceback
+    pcall(function()
+        local h = fsOpen("/crash.log", "w")
+        if h then
+            fsWrite(h, "Desktop crash at uptime=" ..
+                    tostring(computer.uptime()) .. "\n")
+            fsWrite(h, tostring(runErr) .. "\n")
+            fsClose(h)
+        end
+    end)
+    bsod("Desktop crashed:\n" .. tostring(runErr))
 end
 
--- ============================================================
--- КРОК 14: Завершення
--- ============================================================
-consolePrint("System halted.")
-os.sleep(1)
+-- Desktop завершився нормально
+put("Desktop exited normally.")
+sleep(1)
 computer.shutdown()
