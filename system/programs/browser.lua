@@ -544,7 +544,25 @@ function browser.navigate(win, url, isHistoryNav)
         win._netHandle = nil
     end
 
-    local net = component.internet
+    -- FIX (Critical Bug #1): `component.internet` relied on OpenOS-style
+    -- magic field access. Inside FixOS's own runtime (boot/init.lua's
+    -- custom `component` table) that field never existed, so `net` was
+    -- always nil here and `net.request` below raised "attempt to index
+    -- a nil value" BEFORE pcall could even catch it (pcall's own
+    -- arguments are evaluated first) — meaning navigate() to any real
+    -- URL silently failed, always, even with an Internet Card present.
+    local netAddr = component.list("internet")()
+    if not netAddr then
+        win.loading    = false
+        win._phase     = "idle"
+        win.loadStatus = "Internet Card не знайдена"
+        win.lines = {
+            "", "  [Помилка] Internet Card не знайдена", "",
+            "  Встановіть Internet Card T2 або T3.", "",
+        }
+        return
+    end
+    local net = component.proxy(netAddr)
     local ok, handle = pcall(net.request, url, nil, {
         ["User-Agent"] = "FixOS/" .. VERSION .. " (OpenComputers)",
         ["Accept"]     = "text/html,text/plain,*/*",

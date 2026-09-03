@@ -14,7 +14,31 @@ if not component.isAvailable("gpu") then error("No GPU found") end
 local gpu    = component.proxy(component.list("gpu")())
 local screen = component.list("screen")()
 if not screen then error("No screen") end
-gpu.bind(screen)
+
+-- FIX (Critical Bug #3): gpu.bind() can throw "incompatible gpu and
+-- screen" when tiers mismatch (e.g. a Tier 1 GPU bound to a Tier 3
+-- screen). This call used to be unprotected at the TOP LEVEL of the
+-- chunk (before main() even exists), so a throw here crashed the
+-- whole desktop.lua load, which init.lua's pcall(desktopFn) caught by
+-- calling bsod() -> computer.shutdown(true) (reboot). On the very next
+-- boot the EEPROM re-runs init.lua -> desktop.lua and hits the exact
+-- same incompatible gpu.bind() again -> infinite boot-loop with a
+-- black screen, because each cycle only shows the BSOD for ~15s before
+-- rebooting again.
+--
+-- We now try a couple of bind() call shapes (OC's gpu.bind signature
+-- has varied slightly across versions) and, if it still fails, raise a
+-- single clear error. This still ends up in bsod() on failure (since
+-- init.lua's outer pcall catches it), but at least gives one readable
+-- crash.log entry instead of a silent, unexplained reboot loop.
+local bindOk, bindErr = pcall(gpu.bind, screen, false)
+if not bindOk then
+    bindOk, bindErr = pcall(gpu.bind, screen)
+end
+if not bindOk then
+    error("gpu.bind failed (" .. tostring(bindErr) ..
+          "). Ймовірна несумісність тіерів GPU/Screen.")
+end
 
 -- ── Visual-length helper (Unicode-aware) ─────────────────────
 -- Uses OC's built-in unicode library when available so that
@@ -119,6 +143,13 @@ local W, H = gpu.getResolution()
 local UI = dofile("/system/ui.lua")
 UI.init(gpu)
 local T = UI.Theme
+
+-- FIX (Recommended Refactoring): single source of truth for the
+-- version string, instead of "FixOS 4.0.1" hardcoded independently in
+-- the start menu, shutdown screen, and crash screen (which had already
+-- drifted from boot/init.lua's "4.0.2" and terminal.lua's old "3.2.0").
+local Version   = dofile("/system/version.lua")
+local OS_LABEL  = "FixOS " .. Version.get()
 
 local Lang = dofile("/system/lang.lua")
 Lang.load(cfg.language)
@@ -364,7 +395,7 @@ local function drawStartMenu()
     gpu.setBackground(T.accent)
     gpu.fill(mx, my, MENU_W, 2, " ")
     gpu.setForeground(T.textOnAccent)
-    gpu.set(mx+2, my,   "[*] FixOS 4.0.1")
+    gpu.set(mx+2, my,   "[*] " .. OS_LABEL)
     gpu.set(mx+2, my+1, "    " .. Lang.t("desktop.user"))
 
     gpu.setBackground(T.chromeDark)
@@ -487,7 +518,7 @@ local function handleMenuAction(action)
     state.startOpen = false
     if action == "shutdown" then
         gpu.setBackground(T.chromeDark); gpu.fill(1,1,W,H," ")
-        UI.centerText(1,math.floor(H/2)-1,W,"FixOS 4.0.1",T.accent,T.chromeDark)
+        UI.centerText(1,math.floor(H/2)-1,W,OS_LABEL,T.accent,T.chromeDark)
         UI.centerText(1,math.floor(H/2)+1,W,Lang.t("desktop.shutdown").."...",T.textSecondary,T.chromeDark)
         os.sleep(0.8); computer.shutdown()
     elseif action == "update" then
@@ -581,8 +612,31 @@ local function main()
                             state.drag=win; state.dragOX=mx-win.x; state.dragOY=my-win.y
                         end
                     else
-                        local ok,nr = safeCall(win.program and win.program.click,win,mx,my,btn)
-                        if nr then redrawAll() end
+                        -- FIX: clicks on elements a program marked
+                        -- enabled=false (greyed-out buttons) are no
+                        -- longer dispatched at all. Previously every
+                        -- program's own click() had to remember to
+                        -- re-check `elem.enabled` itself, and at least
+                        -- one (Explorer's "Delete" button when the ".."
+                        -- entry was selected) forgot to — letting a
+                        -- click on a visibly disabled button trigger a
+                        -- destructive fs.remove() on the parent
+                        -- directory. This is defence-in-depth: programs
+                        -- should still self-guard in their own click()
+                        -- handlers too (several already do).
+                        local blockedByDisabled = false
+                        if win.elements then
+                            for _, e in ipairs(win.elements) do
+                                if e.enabled == false and UI.hitTest(e, mx, my) then
+                                    blockedByDisabled = true
+                                    break
+                                end
+                            end
+                        end
+                        if not blockedByDisabled then
+                            local ok,nr = safeCall(win.program and win.program.click,win,mx,my,btn)
+                            if nr then redrawAll() end
+                        end
                     end
                 else
                     local ii = iconAt(mx, my)
@@ -641,7 +695,7 @@ local ok, err = pcall(main)
 if not ok then
     gpu.setBackground(T.danger); gpu.setForeground(T.textOnAccent)
     gpu.fill(1,1,W,H," ")
-    gpu.set(2,2,"FixOS 4.0.1 - Desktop Error:")
+    gpu.set(2,2,OS_LABEL .. " - Desktop Error:")
     gpu.set(2,3,UI.truncate(tostring(err), W-4))
     gpu.set(2,5,"Press any key to reboot")
     computer.pullSignal(); computer.shutdown(true)

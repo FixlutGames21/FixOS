@@ -397,7 +397,12 @@ function explorer.click(win, clickX, clickY, btn)
                 return true
 
             elseif elem.action == "newDir" then
-                if win.currentProxy and not win.drives[win.driveIdx].readOnly then
+                -- FIX: defensive nil-check — win.drives[win.driveIdx]
+                -- indexed directly here would error if state ever got
+                -- out of sync (currentProxy set without a matching
+                -- driveIdx entry).
+                local drive = win.drives[win.driveIdx]
+                if win.currentProxy and not (drive and drive.readOnly) then
                     local newPath = win.cwd .. (win.cwd:match("/$") and "" or "/") .. "nova_papka"
                     local i = 1
                     while win.currentProxy.exists(newPath) do
@@ -410,7 +415,23 @@ function explorer.click(win, clickX, clickY, btn)
                 return true
 
             elseif elem.action == "deleteFile" then
-                if win.selFile and win.currentProxy then
+                -- FIX (Critical Bug #2): never allow deleting the ".."
+                -- pseudo-entry. Previously the enabled=false state only
+                -- affected the button's colour — a click at the same
+                -- screen coordinates still fired this handler, which
+                -- had no name~=".." guard, so it could call
+                -- proxy.remove() on the PARENT directory path.
+                -- OpenComputers' filesystem.remove() deletes
+                -- directories recursively with no confirmation, so this
+                -- could destroy an entire branch of the filesystem.
+                -- Also guard against attempting to delete on a
+                -- read-only drive (the button already hides itself for
+                -- that case via addBtn's `enabled` flag, but the click
+                -- handler must not rely solely on that).
+                local drive = win.drives[win.driveIdx]
+                if win.selFile and win.currentProxy
+                   and win.selFile.name ~= ".."
+                   and not (drive and drive.readOnly) then
                     pcall(win.currentProxy.remove, win.selFile.path)
                     win.selIdx  = nil
                     win.selFile = nil
@@ -479,7 +500,11 @@ function explorer.key(win, char, code)
     elseif code == 28 then
         if win.selFile then explorer._openFile(win, win.selFile); return true end
     elseif code == 211 then
-        if win.selFile and win.currentProxy then
+        -- FIX: same ".." guard as the Delete button click handler.
+        local drive = win.drives[win.driveIdx]
+        if win.selFile and win.currentProxy
+           and win.selFile.name ~= ".."
+           and not (drive and drive.readOnly) then
             pcall(win.currentProxy.remove, win.selFile.path)
             win.selIdx  = nil
             win.selFile = nil

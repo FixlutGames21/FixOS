@@ -183,11 +183,17 @@ end
 
 _G.loadfile = myLoadfile
 
-_G.dofile = function(path)
+-- Критична версія для завантаження життєво важливих файлів під час
+-- boot (наразі використовується лише неявно — сам init.lua вантажить
+-- desktop.lua через myLoadfile() напряму, а не через dofile(), тому
+-- цей шлях і так захищений). Лишаємо публічною на випадок, якщо
+-- майбутній boot-код захоче явно "падати з BSOD" замість звичайної
+-- помилки.
+_G.dofileCritical = function(path)
     local fn, err = myLoadfile(path)
     if not fn then
         bsod("dofile(" .. tostring(path) .. "): " .. tostring(err))
-        return -- bsod перезавантажить, але на всяк випадок
+        return
     end
     local ok, result = pcall(fn)
     if not ok then
@@ -195,6 +201,29 @@ _G.dofile = function(path)
         return
     end
     return result
+end
+
+-- FIX (Stability Bug #4): раніше ЦЯ версія dofile() викликала bsod()
+-- (=> повний reboot комп'ютера) при БУДЬ-ЯКІЙ помилці — навіть коли її
+-- викликали не з boot-послідовності, а з рантайму звичайної програми
+-- (notepad.lua, settings.lua, explorer.lua, mycomputer.lua,
+-- terminal.lua, browser.lua усі роблять
+-- `win._ui = dofile("/system/ui.lua")` при першому draw()).
+-- Тимчасовий збій диска чи гонка при читанні файлу під час відкриття
+-- ОДНОГО вікна перезавантажувала ВЕСЬ комп'ютер разом з усіма іншими
+-- відкритими вікнами.
+--
+-- Тепер dofile() поводиться як звичайний Lua dofile: помилка
+-- пробрасывается вгору звичайним error(), а не bsod'ом. Це безпечно,
+-- бо desktop.lua вже й так огортає кожен program.draw/click/tick у
+-- pcall (safeCall), тож помилка коректно ізолюється на рівні одного
+-- вікна — трохи гірше, ніж повний краш системи.
+_G.dofile = function(path)
+    local fn, err = myLoadfile(path)
+    if not fn then
+        error("dofile(" .. tostring(path) .. "): " .. tostring(err), 0)
+    end
+    return fn()
 end
 
 -- -----------------------------------------------------------------
@@ -289,6 +318,36 @@ function newComp.isAvailable(typeName)
     -- list повертає ітератор; перша ітерація дає результат або nil
     return _rawComp.list(typeName)() ~= nil
 end
+
+-- FIX (Critical Bug #1): без цього metatable вирази на кшталт
+-- `component.internet` або `component.gpu` (як пише звичайний OpenOS-код,
+-- і як реально написані browser.lua / settings.lua) завжди повертали
+-- nil, бо newComp — це проста таблиця без такого поля. Це ламало
+-- Browser і Update Check НАЗАВЖДИ, навіть коли Internet Card
+-- встановлена: `local net = component.internet` ставало nil, і
+-- `net.request` кидало помилку "attempt to index a nil value" ще ДО
+-- виклику pcall (бо аргументи pcall обчислюються заздалегідь).
+--
+-- Кешуємо результат через rawset, щоб не перебудовувати всі
+-- method-closures при кожному зверненні (component.proxy() дорогий:
+-- він ітерує component.methods() і створює N замикань).
+--
+-- ПРИМІТКА про hot-plug: якщо Internet Card / інший компонент
+-- від'єднується і підключається "на льоту" під час роботи системи,
+-- закешований проксі стане невалідним (виклики почнуть падати з
+-- "no such component"). Для типового використання FixOS (стаціонарні
+-- компоненти в корпусі комп'ютера) це прийнятний компроміс; якщо
+-- потрібна повна підтримка hot-plug — приберіть rawset нижче ціною
+-- продуктивності.
+setmetatable(newComp, {
+    __index = function(t, key)
+        local addr = _rawComp.list(key)()
+        if not addr then return nil end
+        local p = newComp.proxy(addr)
+        rawset(t, key, p)
+        return p
+    end
+})
 
 _G.component = newComp
 

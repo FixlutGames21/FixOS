@@ -239,7 +239,9 @@ local function executeCommand(win, cmdLine)
         computer.beep(1000, 0.2); pushLine(win, "BEEP!")
 
     elseif cmd == "ver" or cmd == "version" then
-        pushLine(win, "FixOS 3.2.0 - Windows 10 Edition")
+        -- FIX: was hardcoded "3.2.0", out of sync with version.txt (4.0.1)
+        local Version = dofile("/system/version.lua")
+        pushLine(win, "FixOS " .. Version.get() .. " - Windows 10 Edition")
 
     elseif cmd == "time" then
         pushLine(win, "Time: " .. os.date("%H:%M:%S"))

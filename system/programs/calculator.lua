@@ -65,6 +65,10 @@ function calc.draw(win, gpu, x, y, w, h)
   gpu.fill(x + 1, y, w - 2, 2, " ")
   
   gpu.setForeground(0xFFFFFF)
+  -- NOTE: win.display is always ASCII (digits, '.', '-', "Error"), so
+  -- byte length (#) and unicode.len() agree here — no truncation bug,
+  -- unlike some other windows in this project that render Cyrillic
+  -- text with raw #/​:sub(). Left as-is intentionally.
   local dispText = tostring(win.display)
   if #dispText > w - 4 then
     dispText = dispText:sub(1, w - 4)

@@ -40,7 +40,13 @@ function settings.init(win)
         L("settings.about"),
         L("settings.language"),
     }
-    win.version       = "3.2.2"
+    -- FIX (Recommended Refactoring): read the version through the
+    -- shared system/version.lua module instead of duplicating a
+    -- version.txt reader here with its own hardcoded "3.2.2" fallback,
+    -- which had drifted out of sync with version.txt (4.0.1) and other
+    -- files in the project.
+    local Version     = dofile("/system/version.lua")
+    win.version       = Version.get()
     win.updateStatus  = "Ready"
     win.updatePct     = 0
     win.updateRunning = false
@@ -48,13 +54,6 @@ function settings.init(win)
     win._ui           = nil
 
     local fs = component.proxy(computer.getBootAddress())
-    if fs.exists("/version.txt") then
-        local h = fs.open("/version.txt", "r")
-        if h then
-            local v = fs.read(h, math.huge); fs.close(h)
-            if v then win.version = v:match("[%d%.]+") or win.version end
-        end
-    end
 
     win.resolutions = {
         {w=50,  h=16, name="Tiny    (50x16)"},
@@ -341,7 +340,17 @@ function settings.startUpdateCheck(win)
     win._updateGotData  = false
     win._updateTimeout  = 0
 
-    local net = component.internet
+    -- FIX (Critical Bug #1): `component.internet` was always nil under
+    -- FixOS's own runtime component wrapper (no magic field access),
+    -- so this always failed before pcall could even run, silently
+    -- breaking "Check for Updates" for every user regardless of
+    -- whether an Internet Card was installed.
+    local netAddr = component.list("internet")()
+    if not netAddr then
+        win.updateStatus  = (_G.Lang and _G.Lang.t("settings.upd.no_internet")) or "No internet"
+        win.updatePct     = 0; win.updateRunning = false; return
+    end
+    local net = component.proxy(netAddr)
     local ok, handle = pcall(net.request,
         "https://raw.githubusercontent.com/FixlutGames21/FixOS/main/version.txt")
     if not ok or not handle then

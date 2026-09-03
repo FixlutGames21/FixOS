@@ -58,14 +58,35 @@ end
 
 local function getComponents()
     local comps = {}
+
+    -- FIX (OC Compatibility Issue): "cpu" and "memory" are NOT
+    -- addressable OpenComputers component types — component.list("cpu")
+    -- and component.list("memory") always return an empty iterator in
+    -- vanilla OpenComputers, since CPU tier and RAM sticks are internal
+    -- computer-case parts, not separately addressable components like
+    -- disks/screens/GPUs. The old code silently never showed these two
+    -- entries. We now report them directly via the correct computer.*
+    -- APIs instead of a component.list() check that can never succeed.
+    local okArch, arch = pcall(computer.getArchitecture)
+    table.insert(comps, {
+        icon = "[CPU]",
+        name = "Процесор" .. ((okArch and arch) and (" (" .. arch .. ")") or ""),
+        type = "cpu",
+    })
+    table.insert(comps, {
+        icon = "[RAM]",
+        name = string.format("Пам'ять (%dK)", math.floor(computer.totalMemory() / 1024)),
+        type = "memory",
+    })
+
     local types = {
         {"gpu",      "[GPU]", "Відеокарта"},
-        {"cpu",      "[CPU]", "Процесор"},
-        {"memory",   "[RAM]", "Пам'ять"},
         {"internet", "[NET]", "Internet Card"},
         {"screen",   "[SCR]", "Екран"},
         {"modem",    "[MDM]", "Модем"},
         {"redstone", "[RS] ", "Redstone"},
+        {"eeprom",   "[EEP]", "EEPROM"},
+        {"tunnel",   "[LNK]", "Linked Card"},
     }
     for _, t in ipairs(types) do
         local found = false

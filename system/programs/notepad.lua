@@ -145,13 +145,28 @@ function notepad.draw(win, gpu, cx, cy, cw, ch)
         gpu.setBackground(T.surfaceInset)
         gpu.fill(dx + 2, dy + 3, dw - 4, 1, " ")
         gpu.setForeground(T.textPrimary)
+        -- FIX: Unicode-aware length/tail instead of raw byte # and :sub(),
+        -- which could split a multi-byte UTF-8 character (e.g. a
+        -- Cyrillic filename) in half and corrupt the rendered text.
+        local function ulen(s)
+            if unicode and unicode.len then return unicode.len(s) end
+            return #s
+        end
+        local function utail(s, n)
+            if unicode and unicode.sub and unicode.len then
+                local total = unicode.len(s)
+                if total <= n then return s end
+                return unicode.sub(s, total - n + 1, total)
+            end
+            return s:sub(-n)
+        end
         local displayInput = win.saveInput
-        if #displayInput > dw - 6 then
-            displayInput = "..." .. displayInput:sub(-(dw - 9))
+        if ulen(displayInput) > dw - 6 then
+            displayInput = "..." .. utail(displayInput, dw - 9)
         end
         gpu.set(dx + 3, dy + 3, displayInput)
 
-        local cursorX = dx + 3 + #displayInput
+        local cursorX = dx + 3 + ulen(displayInput)
         if cursorX < dx + dw - 3 then
             gpu.setBackground(T.textPrimary); gpu.setForeground(T.surfaceInset)
             gpu.set(cursorX, dy + 3, " ")

@@ -152,27 +152,51 @@ local function download(url, retries)
         local ok, h = pcall(internet.request, url, nil,
             {["User-Agent"] = "FixOS-Installer/" .. VERSION})
         if ok and h then
-            local buf      = {}
-            local deadline = computer.uptime() + 60   -- FIX: 60s (was 30s)
-            local gotData  = false
-
-            while computer.uptime() < deadline do
-                local ok2, c = pcall(h.read, 8192)
-                if ok2 and c and c ~= "" then
-                    table.insert(buf, c); gotData = true
-                elseif gotData then
-                    break
-                else
-                    os.sleep(0.1)
-                end
+            -- FIX: verify the HTTP status BEFORE trusting the body.
+            -- Previously a 404/500 error page from GitHub (e.g. after a
+            -- file was renamed/removed upstream) was accepted as valid
+            -- content as long as it didn't start with <!doctype/<html —
+            -- a plain-text "404: Not Found" response would sail right
+            -- through and get written to disk as the real FixOS file.
+            local status
+            local statusDeadline = computer.uptime() + 10
+            while computer.uptime() < statusDeadline do
+                local sOk, code = pcall(h.response)
+                if sOk then status = code; break end
+                os.sleep(0.05)
             end
-            pcall(h.close)
 
-            local data = table.concat(buf)
-            if #data > 0
-               and not data:lower():match("^%s*<!doctype")
-               and not data:lower():match("^%s*<html") then
-                return data
+            if status and status >= 400 then
+                pcall(h.close)
+                -- fall through to retry (or final failure) below
+            else
+                local buf      = {}
+                local deadline = computer.uptime() + 60   -- FIX: 60s (was 30s)
+                local gotData  = false
+
+                while computer.uptime() < deadline do
+                    local ok2, c = pcall(h.read, 8192)
+                    if ok2 and c and c ~= "" then
+                        table.insert(buf, c); gotData = true
+                    elseif gotData then
+                        break
+                    elseif ok2 then
+                        -- ok2 true but c is nil/"" and we never got any
+                        -- data: connection closed cleanly with nothing
+                        -- to read, don't spin until the deadline.
+                        break
+                    else
+                        os.sleep(0.1)
+                    end
+                end
+                pcall(h.close)
+
+                local data = table.concat(buf)
+                if #data > 0
+                   and not data:lower():match("^%s*<!doctype")
+                   and not data:lower():match("^%s*<html") then
+                    return data
+                end
             end
         end
         if attempt < retries then os.sleep(0.5) end
