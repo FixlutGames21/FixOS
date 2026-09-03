@@ -152,51 +152,63 @@ local function download(url, retries)
         local ok, h = pcall(internet.request, url, nil,
             {["User-Agent"] = "FixOS-Installer/" .. VERSION})
         if ok and h then
-            -- FIX: verify the HTTP status BEFORE trusting the body.
-            -- Previously a 404/500 error page from GitHub (e.g. after a
-            -- file was renamed/removed upstream) was accepted as valid
-            -- content as long as it didn't start with <!doctype/<html —
-            -- a plain-text "404: Not Found" response would sail right
-            -- through and get written to disk as the real FixOS file.
-            local status
-            local statusDeadline = computer.uptime() + 10
-            while computer.uptime() < statusDeadline do
-                local sOk, code = pcall(h.response)
-                if sOk then status = code; break end
-                os.sleep(0.05)
+            local buf      = {}
+            local deadline = computer.uptime() + 60   -- FIX: 60s (was 30s)
+            local gotData  = false
+
+            while computer.uptime() < deadline do
+                local ok2, c = pcall(h.read, 8192)
+                if ok2 and c and c ~= "" then
+                    table.insert(buf, c); gotData = true
+                elseif gotData then
+                    break
+                elseif ok2 then
+                    -- ok2 true but c is nil/"" and we never got any
+                    -- data: connection closed cleanly with nothing
+                    -- to read, don't spin until the deadline.
+                    break
+                else
+                    os.sleep(0.1)
+                end
             end
 
-            if status and status >= 400 then
-                pcall(h.close)
-                -- fall through to retry (or final failure) below
-            else
-                local buf      = {}
-                local deadline = computer.uptime() + 60   -- FIX: 60s (was 30s)
-                local gotData  = false
+            -- FIX (regression fix): only query the HTTP status ONCE,
+            -- and only AFTER we've already read (or tried to read) the
+            -- body — by then the connect handshake is guaranteed to be
+            -- finished either way, so h.response() won't throw
+            -- "connection not established" and doesn't need a blocking
+            -- retry loop. A previous version of this fix polled
+            -- h.response() in a loop for up to 10s BEFORE reading
+            -- anything (since response() throws until the handshake
+            -- completes), which added up to ~10s of wasted
+            -- component.invoke() calls per file per attempt and is what
+            -- actually broke installation (files timing out / "Помилки
+            -- під час встановлення"). This version is best-effort and
+            -- never blocks: if response() isn't available we simply
+            -- fall back to the content heuristic below.
+            local status
+            local sOk, code = pcall(h.response)
+            if sOk then status = code end
 
-                while computer.uptime() < deadline do
-                    local ok2, c = pcall(h.read, 8192)
-                    if ok2 and c and c ~= "" then
-                        table.insert(buf, c); gotData = true
-                    elseif gotData then
-                        break
-                    elseif ok2 then
-                        -- ok2 true but c is nil/"" and we never got any
-                        -- data: connection closed cleanly with nothing
-                        -- to read, don't spin until the deadline.
-                        break
-                    else
-                        os.sleep(0.1)
-                    end
-                end
-                pcall(h.close)
+            pcall(h.close)
 
-                local data = table.concat(buf)
-                if #data > 0
-                   and not data:lower():match("^%s*<!doctype")
-                   and not data:lower():match("^%s*<html") then
-                    return data
-                end
+            local data = table.concat(buf)
+
+            -- FIX: reject the response if we got a bad HTTP status,
+            -- OR (as a fallback when status wasn't available) if the
+            -- body looks like an HTML error page OR a plain-text
+            -- GitHub "404: Not Found" body — the original heuristic
+            -- only caught the HTML case, so a plain-text 404 would
+            -- previously have been silently written to disk as if it
+            -- were the real file.
+            local looksLikeError =
+                (status and status >= 400)
+                or data:lower():match("^%s*<!doctype")
+                or data:lower():match("^%s*<html")
+                or data:match("^%s*404: Not Found%s*$")
+
+            if #data > 0 and not looksLikeError then
+                return data
             end
         end
         if attempt < retries then os.sleep(0.5) end
