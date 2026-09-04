@@ -116,6 +116,7 @@ local FILES = {
     {path="system/ui.lua",                       target="/system/ui.lua"},
     {path="system/lang.lua",                     target="/system/lang.lua"},
     {path="system/desktop.lua",                  target="/system/desktop.lua"},
+	{path="system/version.lua",                  target="/system/version.lua"},
     {path="system/language/en.lang",             target="/system/language/en.lang"},
     {path="system/language/uk.lang",             target="/system/language/uk.lang"},
     {path="system/language/ru.lang",             target="/system/language/ru.lang"},
