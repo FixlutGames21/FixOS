@@ -115,8 +115,13 @@ local FILES = {
     {path="boot/init.lua",                       target="/init.lua"},
     {path="system/ui.lua",                       target="/system/ui.lua"},
     {path="system/lang.lua",                     target="/system/lang.lua"},
+    -- FIX: was missing from the manifest entirely. system/desktop.lua,
+    -- system/programs/settings.lua and system/programs/terminal.lua all
+    -- do dofile("/system/version.lua"), so a fresh install that never
+    -- downloads this file crashes on the very first desktop boot with
+    -- "dofile(/system/version.lua): file not found: /system/version.lua".
+    {path="system/version.lua",                  target="/system/version.lua"},
     {path="system/desktop.lua",                  target="/system/desktop.lua"},
-	{path="system/version.lua",                  target="/system/version.lua"},
     {path="system/language/en.lang",             target="/system/language/en.lang"},
     {path="system/language/uk.lang",             target="/system/language/uk.lang"},
     {path="system/language/ru.lang",             target="/system/language/ru.lang"},
