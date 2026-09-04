@@ -14,6 +14,24 @@ local computer  = require("computer")
 local event     = require("event")
 
 local gpu      = component.gpu
+
+-- FIX (download rewrite v2): switched to the raw component.internet
+-- handle pattern used by MineOS's production installer
+-- (github.com/IgorTimofeev/MineOS/blob/master/Installer/BIOS.lua),
+-- instead of require("internet"). The key thing that pattern gets
+-- right, which our earlier hand-rolled attempts did NOT:
+--
+--   local chunk = handle.read(math.huge)
+--
+-- called in a tight `while true do ... end` loop needs NO os.sleep()
+-- and NO manual "wait for connect" polling. The internet card's read()
+-- method is a non-direct component call, so OpenComputers itself
+-- suspends/yields the calling coroutine internally on every such
+-- invoke until data (or EOF) is actually available — sleeping or
+-- polling on top of that is not just unnecessary, it's what caused the
+-- earlier bugs (silently accepting error pages, then a status-check
+-- loop that stalled every file for up to 10s). This exact loop shape
+-- is what MineOS ships to real users, so we mirror it here.
 local internet = component.isAvailable("internet") and component.internet or nil
 
 if not gpu then error("No GPU") end
@@ -142,75 +160,69 @@ end
 
 -- ============================================================
 -- DOWNLOAD
--- FIX: increased timeout to 60s (was 30s) to prevent truncation
+-- FIX (v2): rewritten to mirror the exact pattern used by MineOS's
+-- production installer (IgorTimofeev/MineOS, Installer/BIOS.lua /
+-- Main.lua) — a raw component.internet handle read in a tight loop
+-- with NO os.sleep() and NO manual "wait for connect/status" polling.
+-- That polling is what caused our two previous regressions; this
+-- pattern is what actually ships to real MineOS users.
 -- ============================================================
 local function download(url, retries)
     if not internet then return nil, "Немає Internet Card" end
     retries = retries or 3
 
     for attempt = 1, retries do
-        local ok, h = pcall(internet.request, url, nil,
-            {["User-Agent"] = "FixOS-Installer/" .. VERSION})
-        if ok and h then
-            local buf      = {}
-            local deadline = computer.uptime() + 60   -- FIX: 60s (was 30s)
-            local gotData  = false
+        local ok, result = pcall(function()
+            local handle, reason = internet.request(url, nil, {
+                ["User-Agent"] = "FixOS-Installer/" .. VERSION,
+            })
+            if not handle then
+                error(reason or "request failed")
+            end
 
-            while computer.uptime() < deadline do
-                local ok2, c = pcall(h.read, 8192)
-                if ok2 and c and c ~= "" then
-                    table.insert(buf, c); gotData = true
-                elseif gotData then
-                    break
-                elseif ok2 then
-                    -- ok2 true but c is nil/"" and we never got any
-                    -- data: connection closed cleanly with nothing
-                    -- to read, don't spin until the deadline.
-                    break
+            local buf      = {}
+            local deadline = computer.uptime() + 60  -- last-resort safety net only
+
+            while true do
+                -- FIX: no os.sleep() here — handle.read() is a
+                -- non-direct component call, OpenComputers itself
+                -- suspends the coroutine until data/EOF is ready.
+                -- Adding sleep/polling on top (like our earlier
+                -- attempts did) only slowed things down or broke them.
+                local chunk = handle.read(math.huge)
+                if chunk then
+                    buf[#buf + 1] = chunk
                 else
-                    os.sleep(0.1)
+                    break -- nil chunk == EOF, exactly like MineOS's loop
+                end
+                if computer.uptime() > deadline then
+                    error("timeout: з'єднання зависло понад 60с")
                 end
             end
 
-            -- FIX (regression fix): only query the HTTP status ONCE,
-            -- and only AFTER we've already read (or tried to read) the
-            -- body — by then the connect handshake is guaranteed to be
-            -- finished either way, so h.response() won't throw
-            -- "connection not established" and doesn't need a blocking
-            -- retry loop. A previous version of this fix polled
-            -- h.response() in a loop for up to 10s BEFORE reading
-            -- anything (since response() throws until the handshake
-            -- completes), which added up to ~10s of wasted
-            -- component.invoke() calls per file per attempt and is what
-            -- actually broke installation (files timing out / "Помилки
-            -- під час встановлення"). This version is best-effort and
-            -- never blocks: if response() isn't available we simply
-            -- fall back to the content heuristic below.
-            local status
-            local sOk, code = pcall(h.response)
-            if sOk then status = code end
+            handle.close()
+            return table.concat(buf)
+        end)
 
-            pcall(h.close)
-
-            local data = table.concat(buf)
-
-            -- FIX: reject the response if we got a bad HTTP status,
-            -- OR (as a fallback when status wasn't available) if the
-            -- body looks like an HTML error page OR a plain-text
-            -- GitHub "404: Not Found" body — the original heuristic
-            -- only caught the HTML case, so a plain-text 404 would
-            -- previously have been silently written to disk as if it
-            -- were the real file.
+        if ok and result and #result > 0 then
+            -- FIX: MineOS's own loader trusts the body unconditionally
+            -- (it has no equivalent check). We keep a light content
+            -- heuristic on top, since GitHub raw can return an HTML or
+            -- plain-text error page with HTTP 200-adjacent framing in
+            -- some edge cases (renamed/removed file upstream) — this
+            -- only inspects the ALREADY-read string, so it can't
+            -- reintroduce the earlier connection-state bugs.
+            local lower = result:lower()
             local looksLikeError =
-                (status and status >= 400)
-                or data:lower():match("^%s*<!doctype")
-                or data:lower():match("^%s*<html")
-                or data:match("^%s*404: Not Found%s*$")
+                lower:match("^%s*<!doctype")
+                or lower:match("^%s*<html")
+                or result:match("^%s*404: Not Found%s*$")
 
-            if #data > 0 and not looksLikeError then
-                return data
+            if not looksLikeError then
+                return result
             end
         end
+
         if attempt < retries then os.sleep(0.5) end
     end
     return nil, "Завантаження не вдалося"
