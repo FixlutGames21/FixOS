@@ -73,7 +73,7 @@ local function showBoot()
 
     local logo = {
         "\xE2\x95\x94\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x97",
-        "\xE2\x95\x91  FixOS 4.0.1                    \xE2\x95\x91",
+        "\xE2\x95\x91  FixOS 4.2.0                    \xE2\x95\x91",
         "\xE2\x95\x91  OpenComputers Edition           \xE2\x95\x91",
         "\xE2\x95\x91  Fixed. Fast. Functional.        \xE2\x95\x91",
         "\xE2\x95\x9A\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x9D",
@@ -209,7 +209,7 @@ local WIN_SIZES = {
     mycomputer = {60, 22},
     terminal   = {68, 22},
     explorer   = {70, 22},
-    browser    = {74, 22},
+    browser    = {78, 23},
 }
 
 -- ============================================================
@@ -445,6 +445,10 @@ end
 
 local function closeWindow(idx)
     if not state.windows[idx] then return end
+    -- 4.2.0: дати програмі звільнити ресурси (напр. браузер закриває
+    -- відкрите HTTP-з'єднання; Internet Card тримає їх лише кілька).
+    local w = state.windows[idx]
+    if w.program and w.program.close then safeCall(w.program.close, w) end
     table.remove(state.windows, idx)
     if #state.windows > 0 then
         state.focused = math.min(idx, #state.windows)
@@ -686,6 +690,19 @@ local function main()
                 local win = state.windows[state.focused]
                 local ok,nr = safeCall(win.program and win.program.key,win,char,code)
                 if nr then redrawAll() end
+            end
+
+        -- ── CLIPBOARD (Shift+Insert / середня кнопка миші) ──
+        -- 4.2.0: раніше цю подію ніхто не обробляв, і вставити URL
+        -- у браузер було неможливо. Програма може мати paste(win, text).
+        elseif t == "clipboard" then
+            local _,_,text = table.unpack(ev)
+            if state.focused and state.windows[state.focused] then
+                local win = state.windows[state.focused]
+                if not win.minimized and type(text) == "string" then
+                    local ok,nr = safeCall(win.program and win.program.paste,win,text)
+                    if nr then redrawAll() end
+                end
             end
         end
     end

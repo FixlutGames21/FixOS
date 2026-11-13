@@ -295,16 +295,19 @@ end
 function settings.tick(win)
     if not win.updateRunning or not win._updateHandle then return false end
 
-    local ok, chunk = pcall(win._updateHandle.read, 8192)
+    -- 4.2.0: handle.read() повертає "" поки даних ще немає і nil лише
+    -- в кінці відповіді. Раніше перший "" після даних вважався кінцем,
+    -- а помилка pcall до отримання даних - просто ігнорувалась.
+    local ok, chunk = pcall(win._updateHandle.read, math.huge)
     if ok and chunk and chunk ~= "" then
         table.insert(win._updateBuf, chunk)
         win._updateGotData = true
         win.updatePct      = 0.7
-    elseif win._updateGotData then
+    elseif (ok and chunk == nil) or (not ok and win._updateGotData) then
         pcall(win._updateHandle.close)
         win._updateHandle = nil
         local data   = table.concat(win._updateBuf)
-        local remote = data:match("[%d%.]+")
+        local remote = data:match("^%s*(%d+%.%d+[%d%.]*)")
         if remote then
             win.updatePct = 1.0
             if remote == win.version then
@@ -313,13 +316,14 @@ function settings.tick(win)
                 win.updateStatus = (_G.Lang and _G.Lang.t("settings.upd.available", remote)) or ("v"..remote.." available")
             end
         else
-            win.updateStatus = "Invalid response"; win.updatePct = 0
+            win.updateStatus = (_G.Lang and _G.Lang.t("settings.upd.invalid")) or "Invalid response"
+            win.updatePct = 0
         end
         win.updateRunning = false
         return true
     else
         win._updateTimeout = (win._updateTimeout or 0) + 1
-        if win._updateTimeout > 400 then
+        if win._updateTimeout > 600 then
             pcall(win._updateHandle.close)
             win._updateHandle = nil
             win.updateStatus  = "Timeout"; win.updatePct = 0; win.updateRunning = false

@@ -104,7 +104,7 @@ end
 UI.init(gpu)
 local T = UI.Theme
 
-local VERSION   = "4.0.1"
+local VERSION   = "4.2.0"
 local MIN_SPACE = 1024 * 512   -- 512 KB minimum
 local REPO      = "https://raw.githubusercontent.com/FixlutGames21/FixOS/main"
 
@@ -114,6 +114,9 @@ local REPO      = "https://raw.githubusercontent.com/FixlutGames21/FixOS/main"
 local FILES = {
     {path="boot/init.lua",                       target="/init.lua"},
     {path="system/ui.lua",                       target="/system/ui.lua"},
+    -- 4.2.0: мережева бібліотека та HTML-рендерер для браузера
+    {path="system/lib/net.lua",                  target="/system/lib/net.lua"},
+    {path="system/lib/html.lua",                 target="/system/lib/html.lua"},
     {path="system/lang.lua",                     target="/system/lang.lua"},
     -- FIX: was missing from the manifest entirely. system/desktop.lua,
     -- system/programs/settings.lua and system/programs/terminal.lua all
@@ -533,7 +536,7 @@ local function screen_finish()
     UI.centerText(CX, y+1, CW, "Pixel Perfect | OpenComputers Edition",     T.textSecondary, T.surface)
 
     local info = {
-        "Browser:  Виправлено (фази connecting/reading)",
+        "Browser:  HTTPS, посилання, пошук, Reader, діагностика",
         "Explorer: Всі диски, sidebar, іконки за типом",
         "My PC:    Всі компоненти + диски в реальному часі",
         "Desktop:  Нові іконки, анімація завантаження",

@@ -37,3 +37,17 @@ FixOS is currently under development. New features, improvements, and bug fixes 
 ## Contributing
 
 Contributions, bug reports, and suggestions are welcome.
+
+## Browser (4.2.0)
+
+Браузер переписано: працює з Internet Card, показує сторінки з клікабельними посиланнями.
+
+- HTTP/HTTPS, редіректи (в т.ч. http <-> https), ліміт розміру за вільною RAM
+- Автовідкат на http:// при помилці сертифіката (PKIX/SSL на старій Java)
+- Запасний TCP-режим для http://, якщо HTTP вимкнено в конфігу сервера
+- Адресний рядок = пошук (DuckDuckGo), кирилиця, вставка Shift+Insert
+- Режим Reader [M] через r.jina.ai (сторонній сервіс!) для сайтів на JavaScript
+- about:net - діагностика мережі, about:help - довідка
+
+Нові файли: `system/lib/net.lua`, `system/lib/html.lua`.
+Змінено: `desktop.lua` (подія clipboard, закриття вікна звільняє з'єднання), `settings.lua` (перевірка оновлень), `installer.lua`.
