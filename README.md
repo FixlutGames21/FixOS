@@ -19,7 +19,7 @@ A lightweight operating system for the OpenComputers Minecraft mod.
 Download the installer:
 
 ```lua
-wget -f https://raw.githubusercontent.com/FixlutGames21/FixOS/main/installer.lua /home/installer.lua
+wget -f https://raw.githubusercontent.com/FixlutGames21/FixOS/main/installer.lua /home/installer.lua && /home/installer.lua
 ```
 
 ### Installation Steps
