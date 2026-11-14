@@ -1,0 +1,49 @@
+manifest=1
+os=4.3.0
+repo=FixlutGames21/FixOS
+branch=main
+component|core|FixOS Core|4.3.0|reboot|
+file|core|boot/init.lua|/init.lua|16633|b280eaf6
+file|core|system/ui.lua|/system/ui.lua|14367|208e23cc
+file|core|system/lang.lua|/system/lang.lua|2712|39494054
+file|core|system/version.lua|/system/version.lua|1682|a95f06f8
+file|core|system/desktop.lua|/system/desktop.lua|30717|c003ae17
+file|core|system/language/en.lang|/system/language/en.lang|2060|e9cfde11
+file|core|system/language/ru.lang|/system/language/ru.lang|2151|d967053b
+file|core|system/language/uk.lang|/system/language/uk.lang|2801|8d9bbd99
+file|core|system/icons/browser.png|/system/icons/browser.png|257|5d865cae
+file|core|system/icons/calculator.png|/system/icons/calculator.png|187|a2c13a12
+file|core|system/icons/explorer.png|/system/icons/explorer.png|215|5a474996
+file|core|system/icons/mycomputer.png|/system/icons/mycomputer.png|200|fbb841ac
+file|core|system/icons/notepad.png|/system/icons/notepad.png|237|048154ce
+file|core|system/icons/settings.png|/system/icons/settings.png|238|3941592d
+file|core|system/icons/terminal.png|/system/icons/terminal.png|201|fe4a4743
+file|core|version.txt|/version.txt|5|02e600f4
+component|netlib|Network library|1.0.0||
+file|netlib|system/lib/net.lua|/system/lib/net.lua|27914|5033d127
+component|htmllib|HTML renderer|1.0.0||
+file|htmllib|system/lib/html.lua|/system/lib/html.lua|30098|31872cb3
+component|browser|Browser|4.2.0||netlib,htmllib
+file|browser|system/programs/browser.lua|/system/programs/browser.lua|37991|09e4583f
+component|updater|Update Center|2.0.0||netlib
+file|updater|system/lib/updater.lua|/system/lib/updater.lua|33685|7648e476
+file|updater|system/programs/updatecenter.lua|/system/programs/updatecenter.lua|26737|e70d4152
+component|fixpaint|FixPaint|1.0.0||
+file|fixpaint|system/programs/fixpaint.lua|/system/programs/fixpaint.lua|35758|9be5af6f
+component|devmgr|Device Manager|1.0.0||
+file|devmgr|system/programs/devmgr.lua|/system/programs/devmgr.lua|22003|4e5c5622
+component|explorer|Explorer|4.3.0||
+file|explorer|system/programs/explorer.lua|/system/programs/explorer.lua|19044|94cba1c2
+component|settings|Settings|4.3.0||
+file|settings|system/programs/settings.lua|/system/programs/settings.lua|17031|bc1e29ad
+component|calculator|Calculator|4.0.1||
+file|calculator|system/programs/calculator.lua|/system/programs/calculator.lua|4564|5df40999
+component|notepad|Notepad|4.0.1||
+file|notepad|system/programs/notepad.lua|/system/programs/notepad.lua|12755|637a4f5f
+component|terminal|Terminal|4.0.1||
+file|terminal|system/programs/terminal.lua|/system/programs/terminal.lua|13553|dc5881b2
+component|mycomputer|My Computer|4.0.1||
+file|mycomputer|system/programs/mycomputer.lua|/system/programs/mycomputer.lua|11505|f3271f79
+log|4.3.0|Нові програми: FixPaint, Device Manager
+log|4.3.0|Update Center: версії програм, резервні копії, відкат
+log|4.2.0|Browser: HTTPS, редіректи, посилання, пошук, Reader

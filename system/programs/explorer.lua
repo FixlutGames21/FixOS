@@ -19,7 +19,7 @@ local EDITABLE = {
 
 local FILE_ICONS = {
     lua="[LUA]", txt="[TXT]", cfg="[CFG]", md="[MD] ",
-    log="[LOG]", json="[JSN]", png="[PNG]",
+    log="[LOG]", json="[JSN]", png="[PNG]", fpt="[PNT]",
     ["default"]="[---]",
 }
 
@@ -275,7 +275,7 @@ function explorer.draw(win, gpu, cx, cy, cw, ch)
     addBtn("[^] Назад",     "goUp",       win.cwd ~= "/")
     addBtn("[+] Папка",     "newDir",     win.currentProxy and not (win.drives[win.driveIdx] and win.drives[win.driveIdx].readOnly))
     addBtn("[DEL] Видалити","deleteFile",  win.selFile ~= nil and win.selFile.name ~= "..")
-    if win.selFile and not win.selFile.isDir and EDITABLE[getExt(win.selFile.name)] then
+    if win.selFile and not win.selFile.isDir and (EDITABLE[getExt(win.selFile.name)] or getExt(win.selFile.name) == "fpt") then
         addBtn("[N] Відкрити", "openNotepad", true)
     end
 
@@ -456,6 +456,8 @@ function explorer._openFile(win, file)
         win.selFile = nil
         win.scrollY = 0
         explorer.refresh(win)
+    elseif getExt(file.name) == "fpt" then
+        if _G.createWindow then _G.createWindow("fixpaint", {filepath = file.path}) end
     elseif EDITABLE[getExt(file.name)] then
         if _G.createWindow then
             _G.createWindow("notepad", {filepath = file.path, proxy = win.currentProxy})

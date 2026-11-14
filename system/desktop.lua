@@ -73,7 +73,7 @@ local function showBoot()
 
     local logo = {
         "\xE2\x95\x94\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x97",
-        "\xE2\x95\x91  FixOS 4.2.0                    \xE2\x95\x91",
+        "\xE2\x95\x91  FixOS 4.3.0                    \xE2\x95\x91",
         "\xE2\x95\x91  OpenComputers Edition           \xE2\x95\x91",
         "\xE2\x95\x91  Fixed. Fast. Functional.        \xE2\x95\x91",
         "\xE2\x95\x9A\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x9D",
@@ -200,6 +200,9 @@ local ICONS = {
     {x=18, y=9,  lines={"  [N] ",   "  Note "},  label=Lang.t("app.notepad"),    color=0x1565C0,     prog="notepad"},
     {x=18, y=16, lines={"  [o] ",   "  Cfg  "},  label=Lang.t("app.settings"),   color=T.tileGray,   prog="settings"},
     {x=34, y=2,  lines={"  [W] ",   " Web   "},  label="Browser",                color=0x00695C,     prog="browser"},
+    {x=34, y=9,  lines={"  [#] ",   " Paint "},  label="FixPaint",               color=0xAD1457,     prog="fixpaint"},
+    {x=34, y=16, lines={"  [D] ",   " Devs  "},  label="Device Manager",         color=0x455A64,     prog="devmgr"},
+    {x=50, y=2,  lines={"  [U] ",   " Update"},  label="Update Center",          color=T.tileGreen,  prog="updatecenter"},
 }
 
 local WIN_SIZES = {
@@ -210,6 +213,9 @@ local WIN_SIZES = {
     terminal   = {68, 22},
     explorer   = {70, 22},
     browser    = {78, 23},
+    fixpaint   = {78, 23},
+    devmgr     = {76, 24},
+    updatecenter = {76, 24},
 }
 
 -- ============================================================
@@ -380,15 +386,21 @@ local START_MENU_TILES = {
     {label=Lang.t("app.notepad"),    icon="[N]",  color=0x1565C0,     action="notepad"},
     {label="Browser",                icon="[W]",  color=0x00695C,     action="browser"},
     {label=Lang.t("app.settings"),   icon="[S]",  color=T.tileGray,   action="settings"},
-    {label=Lang.t("app.update"),     icon="[U]",  color=T.tileGreen,  action="update"},
+    {label="FixPaint",               icon="[#]",  color=0xAD1457,     action="fixpaint"},
+    {label="Devices",                 icon="[D]",  color=0x455A64,     action="devmgr"},
+    {label="Updates",                 icon="[U]",  color=T.tileGreen,  action="updatecenter"},
 }
 
 local _menuHits = {}
-local MENU_W    = 2 + (UI.TILE_W + UI.TILE_GAP) * 2 - UI.TILE_GAP + 2
-local MENU_H    = 3 + (UI.TILE_H + UI.TILE_GAP) * 4 - UI.TILE_GAP + 4
+-- 4.3.0: 3 колонки плиток (11 програм), компактна висота, щоб меню
+-- повністю вміщалось на екрані 80x25 (раніше шапка меню виходила за край).
+local MENU_COLS = 3
+local MENU_ROWS = math.ceil(#START_MENU_TILES / MENU_COLS)
+local MENU_W    = 2 + (UI.TILE_W + UI.TILE_GAP) * MENU_COLS - UI.TILE_GAP + 2
+local MENU_H    = 3 + (UI.TILE_H + UI.TILE_GAP) * MENU_ROWS - UI.TILE_GAP + 2
 
 local function drawStartMenu()
-    local mx, my = 1, H - MENU_H - 1
+    local mx, my = 1, math.max(1, H - MENU_H)
     gpu.setBackground(T.chromeDark)
     gpu.fill(mx, my, MENU_W, MENU_H, " ")
 
@@ -400,9 +412,9 @@ local function drawStartMenu()
 
     gpu.setBackground(T.chromeDark)
     gpu.setForeground(T.textSecondary)
-    gpu.set(mx+2, my+3, Lang.t("desktop.apps"))
+    gpu.set(mx+2, my+2, Lang.t("desktop.apps"))
 
-    _menuHits = UI.drawStartMenuGrid(mx+2, my+4, START_MENU_TILES)
+    _menuHits = UI.drawStartMenuGrid(mx+2, my+3, START_MENU_TILES, MENU_COLS)
 
     local powerY = my + MENU_H - 2
     gpu.setBackground(T.danger); gpu.fill(mx, powerY, MENU_W, 2, " ")
@@ -448,6 +460,7 @@ local function closeWindow(idx)
     -- 4.2.0: дати програмі звільнити ресурси (напр. браузер закриває
     -- відкрите HTTP-з'єднання; Internet Card тримає їх лише кілька).
     local w = state.windows[idx]
+    if state.capture == w then state.capture = nil end
     if w.program and w.program.close then safeCall(w.program.close, w) end
     table.remove(state.windows, idx)
     if #state.windows > 0 then
@@ -526,8 +539,7 @@ local function handleMenuAction(action)
         UI.centerText(1,math.floor(H/2)+1,W,Lang.t("desktop.shutdown").."...",T.textSecondary,T.chromeDark)
         os.sleep(0.8); computer.shutdown()
     elseif action == "update" then
-        createWindow("settings")
-        if state.windows[#state.windows] then state.windows[#state.windows].selectedTab = 4 end
+        createWindow("updatecenter")
     elseif action then
         createWindow(action)
     end
@@ -572,7 +584,9 @@ local function main()
         -- ── TOUCH ──────────────────────────────────────────
         if t == "touch" then
             local _,_,mx,my,btn = table.unpack(ev)
+            local rawX, rawY = mx, my   -- 4.3.0: дробові координати (precise-режим) для FixPaint
             mx, my = math.floor(mx), math.floor(my)  -- guard against float coords
+            state.capture = nil
 
             if state.startOpen then
                 local hit = false
@@ -638,8 +652,11 @@ local function main()
                             end
                         end
                         if not blockedByDisabled then
-                            local ok,nr = safeCall(win.program and win.program.click,win,mx,my,btn)
+                            local ok,nr = safeCall(win.program and win.program.click,win,mx,my,btn,rawX,rawY)
                             if nr then redrawAll() end
+                            -- 4.3.0: програми з drag() отримують наступні drag/drop
+                            -- (малювання мишею у FixPaint)
+                            if win.program and win.program.drag then state.capture = win end
                         end
                     end
                 else
@@ -658,19 +675,34 @@ local function main()
             end
 
         -- ── DRAG ───────────────────────────────────────────
-        elseif t == "drag" and state.drag then
-            local _,_,mx,my = table.unpack(ev)
-            mx, my = math.floor(mx), math.floor(my)
-            local win = state.drag
-            if not win.maximized then
-                win.x = math.max(0, math.min(W-win.w, mx-state.dragOX))
-                win.y = math.max(1, math.min(H-2-win.h, my-state.dragOY))
-                redrawAll()
+        elseif t == "drag" then
+            local _,_,rawX,rawY,btn = table.unpack(ev)
+            local mx, my = math.floor(rawX), math.floor(rawY)
+            if state.capture then
+                local cw = state.capture
+                local ok,nr = safeCall(cw.program and cw.program.drag,cw,mx,my,btn,rawX,rawY)
+                if nr then redrawAll() end
+            elseif state.drag then
+                local win = state.drag
+                if not win.maximized then
+                    win.x = math.max(0, math.min(W-win.w, mx-state.dragOX))
+                    win.y = math.max(1, math.min(H-2-win.h, my-state.dragOY))
+                    redrawAll()
+                end
             end
 
         -- ── DROP ───────────────────────────────────────────
         elseif t == "drop" then
+            local _,_,rawX,rawY,btn = table.unpack(ev)
             state.drag = nil
+            if state.capture then
+                local cw = state.capture
+                state.capture = nil
+                if rawX and rawY then
+                    local ok,nr = safeCall(cw.program and cw.program.drop,cw,math.floor(rawX),math.floor(rawY),btn,rawX,rawY)
+                    if nr then redrawAll() end
+                end
+            end
 
         -- ── SCROLL ─────────────────────────────────────────
         elseif t == "scroll" then

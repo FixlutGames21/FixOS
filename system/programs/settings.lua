@@ -194,6 +194,12 @@ function settings.draw(win, gpu, cx, cy, cw, ch)
             label, "accent", hasNet and not running)
         chkBtn.action = "update"; table.insert(win.elements, chkBtn)
 
+        -- 4.3.0: повний Update Center (версії програм, резервні копії, відкат)
+        contentY = contentY + 3
+        local ucBtn = UI.drawButton(contentX, contentY, math.min(30, contentW), 2,
+            "Update Center...", "secondary", true)
+        ucBtn.action = "openUC"; table.insert(win.elements, ucBtn)
+
         if not hasNet then
             contentY = contentY + 3
             gpu.setForeground(T.danger); gpu.setBackground(T.surface)
@@ -264,6 +270,10 @@ function settings.click(win, clickX, clickY, button)
 
             elseif elem.action == "update" then
                 if not win.updateRunning then settings.startUpdateCheck(win) end
+                return true
+
+            elseif elem.action == "openUC" then
+                if _G.createWindow then _G.createWindow("updatecenter") end
                 return true
 
             elseif elem.action == "wallpaper" then

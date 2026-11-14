@@ -307,7 +307,8 @@ function UI.drawTile(x, y, label, icon, color, hover)
 end
 
 -- ── Start-menu grid ───────────────────────────────────────────
-function UI.drawStartMenuGrid(originX, originY, tiles)
+function UI.drawStartMenuGrid(originX, originY, tiles, cols)
+    cols = cols or 2
     local hits = {}
     local col, row = 0, 0
     for _, tile in ipairs(tiles) do
@@ -317,7 +318,7 @@ function UI.drawStartMenuGrid(originX, originY, tiles)
         btn.action = tile.action
         table.insert(hits, btn)
         col = col + 1
-        if col >= 2 then col = 0; row = row + 1 end
+        if col >= cols then col = 0; row = row + 1 end
     end
     return hits
 end

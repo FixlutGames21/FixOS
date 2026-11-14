@@ -104,7 +104,7 @@ end
 UI.init(gpu)
 local T = UI.Theme
 
-local VERSION   = "4.2.0"
+local VERSION   = "4.3.0"
 local MIN_SPACE = 1024 * 512   -- 512 KB minimum
 local REPO      = "https://raw.githubusercontent.com/FixlutGames21/FixOS/main"
 
@@ -117,6 +117,9 @@ local FILES = {
     -- 4.2.0: мережева бібліотека та HTML-рендерер для браузера
     {path="system/lib/net.lua",                  target="/system/lib/net.lua"},
     {path="system/lib/html.lua",                 target="/system/lib/html.lua"},
+    -- 4.3.0: Update Center (оновлення з GitHub, версії, резервні копії, відкат)
+    {path="system/lib/updater.lua",              target="/system/lib/updater.lua"},
+    {path="manifest.txt",                        target="/system/manifest.txt"},
     {path="system/lang.lua",                     target="/system/lang.lua"},
     -- FIX: was missing from the manifest entirely. system/desktop.lua,
     -- system/programs/settings.lua and system/programs/terminal.lua all
@@ -135,6 +138,9 @@ local FILES = {
     {path="system/programs/terminal.lua",        target="/system/programs/terminal.lua"},
     {path="system/programs/explorer.lua",        target="/system/programs/explorer.lua"},
     {path="system/programs/browser.lua",         target="/system/programs/browser.lua"},
+    {path="system/programs/fixpaint.lua",        target="/system/programs/fixpaint.lua"},
+    {path="system/programs/devmgr.lua",          target="/system/programs/devmgr.lua"},
+    {path="system/programs/updatecenter.lua",    target="/system/programs/updatecenter.lua"},
     {path="system/icons/mycomputer.png",         target="/system/icons/mycomputer.png"},
     {path="system/icons/calculator.png",         target="/system/icons/calculator.png"},
     {path="system/icons/browser.png",            target="/system/icons/browser.png"},
@@ -536,7 +542,7 @@ local function screen_finish()
     UI.centerText(CX, y+1, CW, "Pixel Perfect | OpenComputers Edition",     T.textSecondary, T.surface)
 
     local info = {
-        "Browser:  HTTPS, посилання, пошук, Reader, діагностика",
+        "Нове:     FixPaint, Device Manager, Update Center",
         "Explorer: Всі диски, sidebar, іконки за типом",
         "My PC:    Всі компоненти + диски в реальному часі",
         "Desktop:  Нові іконки, анімація завантаження",
