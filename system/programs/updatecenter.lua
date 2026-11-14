@@ -67,8 +67,13 @@ function uc.init(win)
     win.title      = "Update Center"
     win.jobLog     = {}
 
+    local okT, tf = pcall(function()
+        if not _G._FixTF then _G._FixTF = dofile("/system/lib/textfield.lua") end
+        return _G._FixTF
+    end)
+    win.TF = okT and tf or nil
     local ok, mod = pcall(dofile, "/system/lib/updater.lua")
-    if not ok or type(mod) ~= "table" then
+    if not ok or type(mod) ~= "table" or not win.TF then
         win.broken = "Не вдалося завантажити /system/lib/updater.lua: " .. tostring(mod)
         return
     end
@@ -408,8 +413,10 @@ function uc.draw(win, gpu, cx, cy, cw, ch)
         gpu.setBackground(T.surface)
         if win.input then
             gpu.setBackground(T.accentSubtle); gpu.fill(cx + 22, y0, cw - 23, 1, " ")
-            gpu.setForeground(T.textPrimary)
-            gpu.set(cx + 23, y0, UI.truncate(win.input.value .. "_", cw - 25))
+            win.TF.draw(gpu, win.input, cx + 23, y0, cw - 25,
+                {fg = T.textPrimary, bg = T.accentSubtle, curFg = T.accentSubtle, curBg = T.textPrimary,
+                 selFg = T.textOnAccent, selBg = T.accent}, true)
+            win.elements[#win.elements + 1] = {x = cx + 22, y = y0, w = cw - 23, h = 1, action = "inputClick", x0 = cx + 23}
             gpu.setBackground(T.surface); gpu.setForeground(T.textSecondary)
             gpu.set(cx + 1, y0 + 1, "Формат: власник/репозиторій@гілка  ·  Enter - зберегти, Esc - скасувати")
         end
@@ -498,8 +505,11 @@ function uc.click(win, mx, my, btn)
                 win.confirm = nil
                 if f then f() end
             elseif a == "confirmNo" then win.confirm = nil
+            elseif a == "inputClick" then
+                if win.input then win.TF.click(win.input, e.x0, mx) end
             elseif a == "editRepo" then
-                win.input = {value = win.U.REPO .. "@" .. win.U.BRANCH}
+                win.input = win.TF.new(win.U.REPO .. "@" .. win.U.BRANCH, {max = 120})
+                win.input.fresh = true
             end
             return true
         end
@@ -528,7 +538,8 @@ end
 
 function uc.paste(win, text)
     if win.input then
-        win.input.value = (win.input.value .. text:gsub("[\r\n].*$", "")):sub(1, 120)
+        local line = text:gsub("[\r\n].*$", "")
+        win.TF.insert(win.input, line)
         return true
     end
     return false
@@ -538,10 +549,12 @@ function uc.key(win, char, code)
     if win.broken then return false end
 
     if win.input then
-        if code == 28 or code == 156 then
-            local repo, branch = win.input.value:match("^%s*([%w%._%-]+/[%w%._%-]+)@([%w%._%-/]+)%s*$")
+        local handled, action = win.TF.key(win.input, char, code)
+        if action == "submit" then
+            local value = win.input.text
+            local repo, branch = value:match("^%s*([%w%._%-]+/[%w%._%-]+)@([%w%._%-/]+)%s*$")
             if not repo then
-                repo = win.input.value:match("^%s*([%w%._%-]+/[%w%._%-]+)%s*$"); branch = win.U.BRANCH
+                repo = value:match("^%s*([%w%._%-]+/[%w%._%-]+)%s*$"); branch = win.U.BRANCH
             end
             if repo then
                 win.U.saveConfig(repo, branch)
@@ -551,9 +564,9 @@ function uc.key(win, char, code)
             else
                 win.result = {ok = false, message = "Невірний формат. Приклад: FixlutGames21/FixOS@main"}
             end
-        elseif code == 1 then win.input = nil
-        elseif code == 14 then win.input.value = win.input.value:sub(1, -2)
-        elseif char and char >= 32 and char < 127 then win.input.value = win.input.value .. string.char(char) end
+        elseif action == "cancel" then
+            win.input = nil
+        end
         return true
     end
 

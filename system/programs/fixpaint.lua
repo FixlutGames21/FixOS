@@ -13,9 +13,12 @@
 --   Файли: /pictures/*.fpt (стиснення RLE, текстовий формат).
 --
 -- Для малювання мишею desktop.lua передає події drag/drop.
--- Якщо екран підтримує "precise" (T3), курсор точний до півкліти;
--- інакше кожен клік зачіпає верхній піксель клітинки (лінії
--- заповнюють решту).
+-- КУРСОР: режим визначається за самими подіями миші, а не за
+-- припущенням. Якщо координати дробові (T3 precise) - це точний
+-- режим: півклітинки = окремі пікселі. Якщо ж екран віддає лише
+-- цілі клітинки (або центри клітинок x+0.5) - режим клітинок:
+-- пензель займає клітинку цілком (обидва пікселі), без зсуву
+-- на "верхній/нижній" піксель.
 -- ==========================================================
 
 local paint = {}
@@ -203,6 +206,23 @@ local function stamp(win, x, y, color)
     end
 end
 
+-- Режим клітинок: пензель вирівняний по клітинках (кожна = 2 пікселі по вертикалі).
+-- cr - абсолютний рядок клітинок. Розмір n пікселів у ширину і ~n у висоту.
+local function stampCell(win, x, cr, color)
+    local n = win.size
+    local lo = -math.floor((n - 1) / 2)
+    local hi = lo + n - 1
+    local n2 = math.ceil(n / 2)
+    local clo = -math.floor((n2 - 1) / 2)
+    local chi = clo + n2 - 1
+    for dc = clo, chi do
+        for h = 0, 1 do
+            local py = 2 * (cr + dc) + h
+            for dx = lo, hi do setPx(win, x + dx, py, color) end
+        end
+    end
+end
+
 local function revertStroke(win)
     local s = win.stroke
     for k = #s - 2, 1, -3 do
@@ -246,13 +266,21 @@ local function redo(win)
     return true
 end
 
-paint._internal = {setPx = setPx, stamp = stamp, commitStroke = commitStroke, undo = undo, redo = redo,
+paint._internal = {setPx = setPx, stamp = stamp, stampCell = stampCell, commitStroke = commitStroke, undo = undo, redo = redo,
                    newCanvas = newCanvas, revertStroke = revertStroke}
 
 -- ============================================================
 -- Файли
 -- ============================================================
 local function getFs() return component.proxy(computer.getBootAddress()) end
+
+local TF
+local function loadTF()
+    if TF then return TF end
+    if not _G._FixTF then _G._FixTF = dofile("/system/lib/textfield.lua") end
+    TF = _G._FixTF
+    return TF
+end
 
 local function ensureDir(fs)
     if not fs.exists(PICTURES_DIR) then fs.makeDirectory(PICTURES_DIR) end
@@ -344,7 +372,8 @@ function paint.init(win, initData)
     win.modal    = nil
     win.status   = nil
     win.px_pos   = nil
-    win.cellMode = true
+    win.cellMode = true      -- уточнюється за подіями миші (див. notePointer)
+    win.preciseSeen = false
     win.filepath = nil
 
     -- точне позиціонування миші (T3): половини клітинок
@@ -466,8 +495,10 @@ local function drawModal(win, gpu, UI, T, cx, cy, cw, ch)
     if m.input then
         y = y + 1
         gpu.setBackground(T.accentSubtle); gpu.fill(bx + 2, y - 1, bw - 4, 1, " ")
-        gpu.setForeground(T.textPrimary)
-        gpu.set(bx + 3, y - 1, UI.truncate(m.input.value .. "_", bw - 6))
+        loadTF().draw(gpu, m.input, bx + 3, y - 1, bw - 6,
+            {fg = T.textPrimary, bg = T.accentSubtle, curFg = T.accentSubtle, curBg = T.textPrimary,
+             selFg = T.textOnAccent, selBg = T.accent}, true)
+        addEl(win, bx + 2, y - 1, bw - 4, "modalInput", {x0 = bx + 3})
         gpu.setBackground(T.surface)
         y = y + 1
     end
@@ -663,10 +694,10 @@ end
 local function doSave(win)
     local default = win.filepath and win.filepath:match("([^/]+)%.fpt$") or "image"
     win.modal = {title = "Зберегти зображення", lines = {"Ім'я файлу (буде збережено в " .. PICTURES_DIR .. "):"},
-        input = {value = default, pattern = "[%w_%-%. ]", max = 40},
+        input = (function() local f = loadTF().new(default, {filter = "[%w_%-%. ]", max = 40}); f.fresh = true; return f end)(),
         buttons = {
             {label = "Зберегти", style = "accent", fn = function()
-                local name = win.modal.input.value:gsub("^%s+", ""):gsub("%s+$", ""):gsub("%.fpt$", "")
+                local name = win.modal.input.text:gsub("^%s+", ""):gsub("%s+$", ""):gsub("%.fpt$", "")
                 if name == "" then return end
                 local ok, err = saveFile(win, PICTURES_DIR .. "/" .. name .. ".fpt")
                 closeModal(win)
@@ -692,10 +723,13 @@ end
 
 local function doColor(win, which)
     win.modal = {title = "Власний колір", lines = {"Введіть HEX-код (RRGGBB), напр. FF8800:"},
-        input = {value = string.format("%06X", which == "bg" and win.bg or win.fg), pattern = "[%x#]", max = 7},
+        input = (function()
+            local f = loadTF().new(string.format("%06X", which == "bg" and win.bg or win.fg), {filter = "[%x#]", max = 7})
+            f.fresh = true; return f
+        end)(),
         buttons = {
             {label = "OK", style = "accent", fn = function()
-                local hex = win.modal.input.value:gsub("#", "")
+                local hex = win.modal.input.text:gsub("#", "")
                 local c = (#hex == 6) and tonumber(hex, 16)
                 if c then
                     if which == "bg" then win.bg = c else win.fg = c end
@@ -729,29 +763,65 @@ local function applyShape(win, d, x, y)
     end
 end
 
--- screen -> піксель. Повертає x, y, або nil якщо поза полотном-переглядом
-local function toPixel(win, mx, my, rx, ry)
+-- ── Курсор ────────────────────────────────────────────────
+-- Дробова частина координат: 0 або 0.5 (центр клітинки) - це "квантовані"
+-- значення, які віддає екран без precise-режиму. Будь-яка інша дробова
+-- частина означає, що екран віддає точну позицію (півклітинки).
+local function frac(v) return v - math.floor(v) end
+local function quantized(v)
+    local f = frac(v)
+    return f < 1e-6 or f > 1 - 1e-6 or math.abs(f - 0.5) < 1e-6
+end
+
+local function notePointer(win, rx, ry)
+    if rx and ry and (not quantized(rx) or not quantized(ry)) then win.preciseSeen = true end
+    win.cellMode = not win.preciseSeen
+end
+
+-- Екранна позиція -> піксель полотна.
+-- Повертає x, y, cell. y завжди в пікселях; у режимі клітинок y = верхній
+-- піксель клітинки. clamp: затискати до меж перегляду (для drag поза вікном).
+-- forceCell: тримати режим, у якому розпочато штрих.
+local function pointerPixel(win, mx, my, rx, ry, clamp, forceCell)
     local c = math.floor(mx) - win._vx
     local r = math.floor(my) - win._vy
-    if c < 0 or r < 0 or c >= win._vw or r >= win._vh then return nil end
-    local half = 0
-    if not win.cellMode and ry and ry ~= math.floor(ry) then
-        half = ((ry - math.floor(ry)) >= 0.5) and 1 or 0
+    local inside = c >= 0 and r >= 0 and c < win._vw and r < win._vh
+    if not inside then
+        if not clamp then return nil end
+        c = math.max(0, math.min(win._vw - 1, c))
+        r = math.max(0, math.min(win._vh - 1, r))
     end
-    return win.ox + c, win.oy + r * 2 + half
+    notePointer(win, rx, ry)
+    local cell
+    if forceCell ~= nil then cell = forceCell else cell = not win.preciseSeen end
+    local y = win.oy + r * 2
+    if not cell and inside and ry then
+        y = y + ((frac(ry) >= 0.5) and 1 or 0)
+    end
+    return win.ox + c, y, cell
 end
 
-local function clampToView(win, mx, my, rx, ry)
-    local c = math.max(0, math.min(win._vw - 1, math.floor(mx) - win._vx))
-    local r = math.max(0, math.min(win._vh - 1, math.floor(my) - win._vy))
-    local half = 0
-    if not win.cellMode and ry and ry ~= math.floor(ry) and math.floor(my) - win._vy == r then
-        half = ((ry - math.floor(ry)) >= 0.5) and 1 or 0
+local function applyShape(win, d, x, y)
+    local color, cell = d.color, d.cell
+    local sx, sy = d.sx, d.sy
+    local plot = function(px, py)
+        if cell then stampCell(win, px, math.floor(py / 2), color) else stamp(win, px, py, color) end
     end
-    return win.ox + c, win.oy + r * 2 + half
+    local solid = function(px, py) setPx(win, px, py, color) end
+    local ya, yb = math.min(sy, y), math.max(sy, y)
+    local extra = cell and 1 or 0           -- нижній піксель останньої клітинки
+    if d.tool == "line" then
+        core.bresenham(sx, sy, x, y, plot)
+    elseif d.tool == "rect" then
+        if win.fillShapes then core.rectFilled(sx, ya, x, yb + extra, solid)
+        else core.rectOutline(sx, sy, x, y, plot) end
+    elseif d.tool == "ellipse" then
+        if win.fillShapes then core.ellipse(sx, ya, x, yb + extra, true, solid)
+        else core.ellipse(sx, sy, x, y, false, plot) end
+    end
 end
 
-local function beginStroke(win, x, y, btn)
+local function beginStroke(win, x, y, btn, cell)
     local tool = win.tool
     local color = (btn == 1) and win.bg or win.fg
     win.px_pos = {x, y}
@@ -769,10 +839,10 @@ local function beginStroke(win, x, y, btn)
         return true            -- потрібне повне перемальовування
     elseif tool == "pencil" or tool == "eraser" then
         if tool == "eraser" then color = win.bg end
-        win.drawing = {tool = tool, color = color, lx = x, ly = y}
-        stamp(win, x, y, color)
+        win.drawing = {tool = tool, color = color, lx = x, ly = y, cell = cell}
+        if cell then stampCell(win, x, math.floor(y / 2), color) else stamp(win, x, y, color) end
     else
-        win.drawing = {tool = tool, color = color, sx = x, sy = y}
+        win.drawing = {tool = tool, color = color, sx = x, sy = y, cell = cell}
         applyShape(win, win.drawing, x, y)
     end
     flushDirty(win)
@@ -788,6 +858,7 @@ function paint.click(win, mx, my, btn, rx, ry)
         for _, e in ipairs(win.elements) do
             if UI.hitTest(e, mx, my) then
                 if e.action == "modalBtn" then modalButton(win, e.index)
+                elseif e.action == "modalInput" and win.modal.input then loadTF().click(win.modal.input, e.x0, mx)
                 elseif e.action == "modalPick" and win.modal.list then win.modal.list.sel = e.index end
                 return true
             end
@@ -816,10 +887,10 @@ function paint.click(win, mx, my, btn, rx, ry)
         end
     end
 
-    local x, y = toPixel(win, mx, my, rx, ry)
+    local x, y, cell = pointerPixel(win, mx, my, rx, ry, false, nil)
     if x then
         win.status = nil
-        return beginStroke(win, x, y, btn)
+        return beginStroke(win, x, y, btn, cell)
     end
     return false
 end
@@ -827,11 +898,14 @@ end
 function paint.drag(win, mx, my, btn, rx, ry)
     local d = win.drawing
     if not d or win.modal then return false end
-    local x, y = clampToView(win, mx, my, rx, ry)
+    local x, y = pointerPixel(win, mx, my, rx, ry, true, d.cell)
     win.px_pos = {x, y}
     if d.tool == "pencil" or d.tool == "eraser" then
         if x ~= d.lx or y ~= d.ly then
-            core.bresenham(d.lx, d.ly, x, y, function(px, py) stamp(win, px, py, d.color) end)
+            core.bresenham(d.lx, d.ly, x, y, function(px, py)
+                if d.cell then stampCell(win, px, math.floor(py / 2), d.color)
+                else stamp(win, px, py, d.color) end
+            end)
             d.lx, d.ly = x, y
         end
     else
@@ -860,14 +934,8 @@ function paint.key(win, char, code)
         if code == 1 then closeModal(win); return true end
         if code == 28 or code == 156 then modalButton(win, 1); return true end
         if m.input then
-            if code == 14 then m.input.value = m.input.value:sub(1, -2); return true end
-            if char and char >= 32 and char < 127 then
-                local ch = string.char(char)
-                if ch:match(m.input.pattern or ".") and #m.input.value < (m.input.max or 40) then
-                    m.input.value = m.input.value .. ch
-                end
-                return true
-            end
+            loadTF().key(m.input, char, code)
+            return true
         elseif m.list then
             if code == 200 then m.list.sel = math.max(1, m.list.sel - 1); return true end
             if code == 208 then m.list.sel = math.min(math.max(1, #m.list.items), m.list.sel + 1); return true end
@@ -899,6 +967,15 @@ function paint.key(win, char, code)
     elseif code == 208 then win.oy = math.min(math.max(0, win.H - (win._vh or 16) * 2), win.oy + 4); return true
     elseif code == 203 then win.ox = math.max(0, win.ox - 4); return true
     elseif code == 205 then win.ox = math.min(math.max(0, win.W - (win._vw or 56)), win.ox + 4); return true
+    end
+    return false
+end
+
+function paint.paste(win, text)
+    if win.modal and win.modal.input then
+        local line = text:gsub("[\r\n].*$", "")
+        loadTF().insert(win.modal.input, line)
+        return true
     end
     return false
 end

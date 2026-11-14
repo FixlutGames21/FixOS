@@ -104,7 +104,7 @@ end
 UI.init(gpu)
 local T = UI.Theme
 
-local VERSION   = "4.3.0"
+local VERSION   = "4.3.1"
 local MIN_SPACE = 1024 * 512   -- 512 KB minimum
 local REPO      = "https://raw.githubusercontent.com/FixlutGames21/FixOS/main"
 
@@ -119,6 +119,7 @@ local FILES = {
     {path="system/lib/html.lua",                 target="/system/lib/html.lua"},
     -- 4.3.0: Update Center (оновлення з GitHub, версії, резервні копії, відкат)
     {path="system/lib/updater.lua",              target="/system/lib/updater.lua"},
+    {path="system/lib/textfield.lua",            target="/system/lib/textfield.lua"},
     {path="manifest.txt",                        target="/system/manifest.txt"},
     {path="system/lang.lua",                     target="/system/lang.lua"},
     -- FIX: was missing from the manifest entirely. system/desktop.lua,

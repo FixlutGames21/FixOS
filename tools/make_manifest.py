@@ -27,19 +27,20 @@ import zlib
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-OS_VERSION = "4.3.0"
+OS_VERSION = "4.3.1"
 
 # (id, назва, версія, прапорці, залежності, [шаблони файлів])
 COMPONENTS = [
-    ("core", "FixOS Core", "4.3.0", "reboot", "", [
+    ("core", "FixOS Core", "4.3.1", "reboot", "", [
         "boot/init.lua", "system/ui.lua", "system/lang.lua", "system/version.lua",
         "system/desktop.lua", "system/language/*.lang", "system/icons/*.png", "version.txt"]),
     ("netlib", "Network library", "1.0.0", "", "", ["system/lib/net.lua"]),
     ("htmllib", "HTML renderer", "1.0.0", "", "", ["system/lib/html.lua"]),
-    ("browser", "Browser", "4.2.0", "", "netlib,htmllib", ["system/programs/browser.lua"]),
-    ("updater", "Update Center", "2.0.0", "", "netlib",
+    ("textlib", "Text field (cursor)", "1.0.0", "", "", ["system/lib/textfield.lua"]),
+    ("browser", "Browser", "4.2.1", "", "netlib,htmllib,textlib", ["system/programs/browser.lua"]),
+    ("updater", "Update Center", "2.0.1", "", "netlib,textlib",
         ["system/lib/updater.lua", "system/programs/updatecenter.lua"]),
-    ("fixpaint", "FixPaint", "1.0.0", "", "", ["system/programs/fixpaint.lua"]),
+    ("fixpaint", "FixPaint", "1.1.0", "", "textlib", ["system/programs/fixpaint.lua"]),
     ("devmgr", "Device Manager", "1.0.0", "", "", ["system/programs/devmgr.lua"]),
     ("explorer", "Explorer", "4.3.0", "", "", ["system/programs/explorer.lua"]),
     ("settings", "Settings", "4.3.0", "", "", ["system/programs/settings.lua"]),
@@ -50,6 +51,7 @@ COMPONENTS = [
 ]
 
 CHANGELOG = [
+    ("4.3.1", "Курсор: точне визначення режиму миші у FixPaint; текстовий курсор (каретка) у полях введення"),
     ("4.3.0", "Нові програми: FixPaint, Device Manager"),
     ("4.3.0", "Update Center: версії програм, резервні копії, відкат"),
     ("4.2.0", "Browser: HTTPS, редіректи, посилання, пошук, Reader"),

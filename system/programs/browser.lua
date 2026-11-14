@@ -35,14 +35,16 @@ local STRONG_COL  = 0x9C2B00
 local CODE_COL    = 0x00796B
 local VISITED_COL = 0x7B3FA0
 
-local Net, Html
+local Net, Html, TF
 
 -- ============================================================
 -- Бібліотеки (кешуються в _G, щоб не читати диск для кожного вікна)
 -- ============================================================
 local function loadLibs()
-    if Net and Html then return true end
+    if Net and Html and TF then return true end
     local ok, err = pcall(function()
+        if not _G._FixTF then _G._FixTF = dofile("/system/lib/textfield.lua") end
+        TF = _G._FixTF
         if not _G._FixNet then _G._FixNet = dofile("/system/lib/net.lua") end
         if not _G._FixHtml then
             _G._FixHtml = dofile("/system/lib/html.lua")
@@ -229,8 +231,6 @@ end
 function browser.init(win)
     win.url          = "about:home"
     win.urlBarFocus  = false
-    win.urlFresh     = false
-    win.urlInput     = ""
     win.scrollY      = 0
     win.loading      = false
     win.loadStatus   = "Готово"
@@ -254,7 +254,15 @@ function browser.init(win)
         win.broken = true
         return
     end
+    win.urlField = TF.new("", {max = 500})
     browser.navigate(win, "about:home", {})
+end
+
+-- Фокус на адресному рядку. fresh=true: текст "виділено" (перший символ замінює його).
+function browser.focusUrl(win, text, fresh)
+    if win.broken or not win.urlField then return end
+    TF.set(win.urlField, text or "", fresh)
+    win.urlBarFocus = true
 end
 
 -- Викликається desktop.lua при закритті вікна: звільняє з'єднання
@@ -657,22 +665,19 @@ function browser.draw(win, gpu, cx, cy, cw, ch)
     local urlBg   = win.urlBarFocus and T.accentSubtle or T.surfaceInset
     gpu.setBackground(urlBg)
     gpu.fill(urlBarX, y, urlBarW, 1, " ")
-    gpu.setForeground(win.urlBarFocus and T.textPrimary or T.textSecondary)
-    local displayUrl = win.urlBarFocus and win.urlInput or (win.url or "")
-    local dl = ulen(displayUrl)
-    if dl > urlBarW - 2 then
-        displayUrl = "…" .. usub(displayUrl, dl - (urlBarW - 4), dl)
-        dl = ulen(displayUrl)
+    if win.urlBarFocus and win.urlField then
+        -- справжній текстовий курсор: каретка, прокрутка, виділення "fresh"
+        TF.draw(gpu, win.urlField, urlBarX + 1, y, urlBarW - 2,
+            {fg = T.textPrimary, bg = urlBg, curFg = urlBg, curBg = T.textPrimary,
+             selFg = T.textOnAccent, selBg = T.accent}, true)
+    else
+        gpu.setForeground(T.textSecondary)
+        local displayUrl = win.url or ""
+        local dl = ulen(displayUrl)
+        if dl > urlBarW - 2 then displayUrl = "…" .. usub(displayUrl, dl - (urlBarW - 4), dl) end
+        gpu.set(urlBarX + 1, y, displayUrl)
     end
-    gpu.set(urlBarX + 1, y, displayUrl)
-    if win.urlBarFocus then
-        local curX = urlBarX + 1 + dl
-        if curX < urlBarX + urlBarW then
-            gpu.setBackground(T.textPrimary); gpu.setForeground(urlBg)
-            gpu.set(curX, y, " ")
-        end
-    end
-    win.elements[#win.elements + 1] = {x = urlBarX, y = y, w = urlBarW, h = 1, action = "urlbar"}
+    win.elements[#win.elements + 1] = {x = urlBarX, y = y, w = urlBarW, h = 1, action = "urlbar", x0 = urlBarX + 1}
 
     -- ── Закладки + Reader ────────────────────────────────
     y = cy + 1
@@ -785,9 +790,12 @@ function browser.click(win, mx, my, btn)
         if UI.hitTest(e, mx, my) then
             local a = e.action
             if a == "urlbar" then
-                win.urlBarFocus = true
-                win.urlInput    = win.url or ""
-                win.urlFresh    = true
+                if win.urlBarFocus then
+                    TF.click(win.urlField, e.x0, mx)          -- каретка в місце кліку
+                else
+                    TF.set(win.urlField, win.url or "", true) -- виділити все
+                    win.urlBarFocus = true
+                end
             elseif a == "back" then goHistory(win, -1)
             elseif a == "fwd" then goHistory(win, 1)
             elseif a == "reload" then
@@ -830,13 +838,11 @@ function browser.paste(win, text)
     text = text:gsub("[\r\n].*$", ""):gsub("[%z\1-\31\127]", "")
     text = text:gsub("^%s+", ""):gsub("%s+$", "")
     if text == "" then return false end
-    if win.urlBarFocus and not win.urlFresh then
-        win.urlInput = win.urlInput .. text
-    else
-        win.urlInput = text
+    if not win.urlBarFocus then
+        TF.set(win.urlField, "", false)
+        win.urlBarFocus = true
     end
-    win.urlBarFocus = true
-    win.urlFresh = false
+    TF.insert(win.urlField, text)      -- у позицію каретки (виділений текст замінюється)
     return true
 end
 
@@ -844,36 +850,22 @@ function browser.key(win, char, code)
     if win.broken then return false end
 
     if win.urlBarFocus then
-        if code == 28 or code == 156 then                     -- Enter
-            local u = win.urlInput
+        local handled, action = TF.key(win.urlField, char, code)
+        if action == "submit" then
+            local u = win.urlField.text
             win.urlBarFocus = false
             browser.navigate(win, u, {})
             return true
-        elseif code == 1 then                                 -- Esc
-            win.urlBarFocus = false; return true
-        elseif code == 14 then                                -- Backspace
-            if win.urlFresh then win.urlInput = ""; win.urlFresh = false
-            else
-                local n = ulen(win.urlInput)
-                if n > 0 then win.urlInput = usub(win.urlInput, 1, n - 1) end
-            end
-            return true
-        elseif code == 211 or code == 199 then                -- Delete / Home
-            win.urlInput = ""; win.urlFresh = false; return true
-        elseif char and char >= 32 and char ~= 127 then
-            local ch = (char < 128) and string.char(char) or Net.u8(char)
-            if win.urlFresh then win.urlInput = ""; win.urlFresh = false end
-            win.urlInput = win.urlInput .. ch
+        elseif action == "cancel" then
+            win.urlBarFocus = false
             return true
         end
-        return false
+        return handled
     end
 
     -- гарячі клавіші сторінки
     if char == 117 or char == 85 or char == 47 or char == 1075 or char == 1043 then   -- u U / г Г
-        win.urlBarFocus = true
-        win.urlInput = (char == 47) and "" or (win.url or "")
-        win.urlFresh = (char ~= 47)
+        browser.focusUrl(win, (char == 47) and "" or (win.url or ""), char ~= 47)
         return true
     elseif char == 114 or char == 82 or char == 1082 or char == 1050 then              -- r R к К
         browser.navigate(win, win.url, {histNav = true, noClassify = true}); return true

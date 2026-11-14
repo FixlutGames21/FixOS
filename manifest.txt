@@ -1,13 +1,13 @@
 manifest=1
-os=4.3.0
+os=4.3.1
 repo=FixlutGames21/FixOS
 branch=main
-component|core|FixOS Core|4.3.0|reboot|
+component|core|FixOS Core|4.3.1|reboot|
 file|core|boot/init.lua|/init.lua|16633|b280eaf6
 file|core|system/ui.lua|/system/ui.lua|14367|208e23cc
 file|core|system/lang.lua|/system/lang.lua|2712|39494054
 file|core|system/version.lua|/system/version.lua|1682|a95f06f8
-file|core|system/desktop.lua|/system/desktop.lua|30717|c003ae17
+file|core|system/desktop.lua|/system/desktop.lua|30717|29fcae18
 file|core|system/language/en.lang|/system/language/en.lang|2060|e9cfde11
 file|core|system/language/ru.lang|/system/language/ru.lang|2151|d967053b
 file|core|system/language/uk.lang|/system/language/uk.lang|2801|8d9bbd99
@@ -18,18 +18,20 @@ file|core|system/icons/mycomputer.png|/system/icons/mycomputer.png|200|fbb841ac
 file|core|system/icons/notepad.png|/system/icons/notepad.png|237|048154ce
 file|core|system/icons/settings.png|/system/icons/settings.png|238|3941592d
 file|core|system/icons/terminal.png|/system/icons/terminal.png|201|fe4a4743
-file|core|version.txt|/version.txt|5|02e600f4
+file|core|version.txt|/version.txt|5|02e700f5
 component|netlib|Network library|1.0.0||
 file|netlib|system/lib/net.lua|/system/lib/net.lua|27914|5033d127
 component|htmllib|HTML renderer|1.0.0||
 file|htmllib|system/lib/html.lua|/system/lib/html.lua|30098|31872cb3
-component|browser|Browser|4.2.0||netlib,htmllib
-file|browser|system/programs/browser.lua|/system/programs/browser.lua|37991|09e4583f
-component|updater|Update Center|2.0.0||netlib
+component|textlib|Text field (cursor)|1.0.0||
+file|textlib|system/lib/textfield.lua|/system/lib/textfield.lua|6290|8c790d0b
+component|browser|Browser|4.2.1||netlib,htmllib,textlib
+file|browser|system/programs/browser.lua|/system/programs/browser.lua|37964|24adf5b4
+component|updater|Update Center|2.0.1||netlib,textlib
 file|updater|system/lib/updater.lua|/system/lib/updater.lua|33685|7648e476
-file|updater|system/programs/updatecenter.lua|/system/programs/updatecenter.lua|26737|e70d4152
-component|fixpaint|FixPaint|1.0.0||
-file|fixpaint|system/programs/fixpaint.lua|/system/programs/fixpaint.lua|35758|9be5af6f
+file|updater|system/programs/updatecenter.lua|/system/programs/updatecenter.lua|27261|e67acf9d
+component|fixpaint|FixPaint|1.1.0||textlib
+file|fixpaint|system/programs/fixpaint.lua|/system/programs/fixpaint.lua|39608|bf864c1a
 component|devmgr|Device Manager|1.0.0||
 file|devmgr|system/programs/devmgr.lua|/system/programs/devmgr.lua|22003|4e5c5622
 component|explorer|Explorer|4.3.0||
@@ -44,6 +46,7 @@ component|terminal|Terminal|4.0.1||
 file|terminal|system/programs/terminal.lua|/system/programs/terminal.lua|13553|dc5881b2
 component|mycomputer|My Computer|4.0.1||
 file|mycomputer|system/programs/mycomputer.lua|/system/programs/mycomputer.lua|11505|f3271f79
+log|4.3.1|Курсор: точне визначення режиму миші у FixPaint; текстовий курсор (каретка) у полях введення
 log|4.3.0|Нові програми: FixPaint, Device Manager
 log|4.3.0|Update Center: версії програм, резервні копії, відкат
 log|4.2.0|Browser: HTTPS, редіректи, посилання, пошук, Reader
