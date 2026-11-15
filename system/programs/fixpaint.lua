@@ -13,12 +13,16 @@
 --   Файли: /pictures/*.fpt (стиснення RLE, текстовий формат).
 --
 -- Для малювання мишею desktop.lua передає події drag/drop.
--- КУРСОР: режим визначається за самими подіями миші, а не за
--- припущенням. Якщо координати дробові (T3 precise) - це точний
--- режим: півклітинки = окремі пікселі. Якщо ж екран віддає лише
--- цілі клітинки (або центри клітинок x+0.5) - режим клітинок:
--- пензель займає клітинку цілком (обидва пікселі), без зсуву
--- на "верхній/нижній" піксель.
+-- КУРСОР. За замовчуванням - режим КЛІТИНОК: координати миші такі
+-- самі, як у всій системі (вони точно збігаються з тим, що ви бачите),
+-- пензель займає клітинку цілком (2 пікселі).
+-- Кнопка "Точно" вмикає точний режим екрана T3 (півклітинки = окремі
+-- пікселі). У цьому режимі деякі екрани віддають координати зі зсувом
+-- (клік лягає на клітинку вище/лівіше), тому при вмиканні запускається
+-- КАЛІБРУВАННЯ: 3 кліки по мітках. Поправка зберігається у
+-- /system/fixpaint.cfg і застосовується в desktop.lua до всіх подій
+-- миші, поки точний режим увімкнено (тож і заголовок вікна, і кнопки
+-- влучають правильно).
 -- ==========================================================
 
 local paint = {}
@@ -360,6 +364,148 @@ local function findScreen()
 end
 
 -- ============================================================
+-- Точний режим миші та калібрування
+-- ============================================================
+local CFG_PATH = "/system/fixpaint.cfg"
+
+paint._cfg = {}
+function paint._cfg.load()
+    local cfg = {}
+    local fs = getFs()
+    if not fs.exists(CFG_PATH) then return cfg end
+    local h = fs.open(CFG_PATH, "r")
+    if not h then return cfg end
+    local parts = {}
+    while true do
+        local c = fs.read(h, 1024)
+        if not c then break end
+        parts[#parts + 1] = c
+    end
+    fs.close(h)
+    local text = table.concat(parts)
+    cfg.precise = text:match("precise=(%d)") == "1"
+    cfg.offX = tonumber(text:match("offx=(%-?[%d%.]+)"))
+    cfg.offY = tonumber(text:match("offy=(%-?[%d%.]+)"))
+    return cfg
+end
+
+function paint._cfg.save(win)
+    local fs = getFs()
+    local h = fs.open(CFG_PATH, "w")
+    if not h then return false end
+    fs.write(h, string.format("precise=%d\noffx=%.3f\noffy=%.3f\n", win.precise and 1 or 0, win.offX or 0, win.offY or 0))
+    fs.close(h)
+    return true
+end
+
+-- Поправка для desktop.lua: він додає її до сирих координат кожної події миші
+local function publishOffsets(win)
+    if win.precise then _G._FixPrecise = {offX = win.offX or 0, offY = win.offY or 0, owner = win}
+    elseif _G._FixPrecise and _G._FixPrecise.owner == win then _G._FixPrecise = nil end
+end
+
+function paint.setOffsets(win, ox, oy)
+    win.offX, win.offY = ox, oy
+    publishOffsets(win)
+end
+
+-- Увімкнути/вимкнути точний режим екрана. Повертає ok, помилка
+function paint.setPrecise(win, on)
+    if on then
+        if win.precise then return true end
+        local scr = win._screen or findScreen()
+        if not scr then return false, "Екран не знайдено" end
+        local okP, prev = pcall(scr.isPrecise)
+        local okS, res = pcall(scr.setPrecise, true)
+        if not okS or res == false then
+            return false, "Екран не підтримує точний режим (потрібен T3)"
+        end
+        win._screen = scr
+        if win._prevPrecise == nil then win._prevPrecise = (okP and prev) or false end
+        win.precise, win.cellMode = true, false
+        publishOffsets(win)
+        return true
+    end
+    if win._screen and win.precise then pcall(win._screen.setPrecise, win._prevPrecise or false) end
+    win.precise, win.cellMode = false, true
+    publishOffsets(win)
+    return true
+end
+
+-- Калібрування: 3 мітки; користувач клацає в центр кожної
+local function startCalibration(win)
+    local vw, vh = win._vw or 56, win._vh or 17
+    win.calib = {step = 1, samples = {},
+        targets = {{5, 5}, {math.max(8, vw - 6), math.max(7, vh - 4)}, {math.floor(vw / 2), math.floor(vh / 2) + 1}}}
+    win.status = nil
+end
+
+local function finishCalibration(win)
+    local c = win.calib
+    local n = #c.samples
+    local sx, sy, minx, maxx, miny, maxy = 0, 0, math.huge, -math.huge, math.huge, -math.huge
+    local allQuant = true
+    for _, smp in ipairs(c.samples) do
+        sx = sx + smp.dx; sy = sy + smp.dy
+        minx = math.min(minx, smp.dx); maxx = math.max(maxx, smp.dx)
+        miny = math.min(miny, smp.dy); maxy = math.max(maxy, smp.dy)
+        if not smp.quant then allQuant = false end
+    end
+    if allQuant then
+        win.calib = nil
+        paint.setPrecise(win, false)
+        paint._cfg.save(win)
+        win.status = "Екран віддає лише цілі клітинки - точний режим не працює. Увімкнено режим клітинок."
+        return
+    end
+    if (maxx - minx) > 0.7 or (maxy - miny) > 0.7 then
+        win.calib = nil
+        startCalibration(win)
+        win.status = string.format("Занадто великий розкид (%.2f; %.2f). Цільтеся точно в центр мітки.", maxx - minx, maxy - miny)
+        return
+    end
+    local ox = (win.offX or 0) + sx / n
+    local oy = (win.offY or 0) + sy / n
+    -- майже ціле значення (типовий зсув на клітинку) - округлити
+    if math.abs(ox - math.floor(ox + 0.5)) <= 0.15 then ox = math.floor(ox + 0.5) end
+    if math.abs(oy - math.floor(oy + 0.5)) <= 0.15 then oy = math.floor(oy + 0.5) end
+    paint.setOffsets(win, ox, oy)
+    paint._cfg.save(win)
+    win.calib = nil
+    win.status = string.format("Калібрування збережено: зсув x=%+.2f y=%+.2f клітинки", ox, oy)
+end
+
+local function frac(v) return v - math.floor(v) end
+local function isQuant(v)
+    local f = frac(v)
+    return f < 1e-6 or f > 1 - 1e-6 or math.abs(f - 0.5) < 1e-6
+end
+
+local function calibrationClick(win, rx, ry)
+    local c = win.calib
+    if not rx or not ry then return end
+    local t = c.targets[c.step]
+    local cxm, cym = win._vx + t[1] + 0.5, win._vy + t[2] + 0.5
+    -- rx/ry вже містять поточну поправку desktop.lua
+    c.samples[#c.samples + 1] = {dx = cxm - rx, dy = cym - ry, quant = isQuant(rx) and isQuant(ry)}
+    c.step = c.step + 1
+    if c.step > #c.targets then finishCalibration(win) end
+end
+
+-- Кнопка "Точно": вмикає/вимикає точний режим
+local function togglePrecise(win)
+    if win.precise then
+        paint.setPrecise(win, false)
+        paint._cfg.save(win)
+        win.status = "Режим клітинок: клік займає клітинку цілком."
+        return
+    end
+    local ok, err = paint.setPrecise(win, true)
+    if not ok then win.status = err; return end
+    startCalibration(win)
+end
+
+-- ============================================================
 -- INIT / CLOSE
 -- ============================================================
 function paint.init(win, initData)
@@ -372,20 +518,17 @@ function paint.init(win, initData)
     win.modal    = nil
     win.status   = nil
     win.px_pos   = nil
-    win.cellMode = true      -- уточнюється за подіями миші (див. notePointer)
-    win.preciseSeen = false
+    win.cellMode = true
+    win.precise  = false
+    win.offX, win.offY = 0, 0
+    win.calib    = nil
     win.filepath = nil
 
-    -- точне позиціонування миші (T3): половини клітинок
-    local scr = findScreen()
-    if scr then
-        local okP, prev = pcall(scr.isPrecise)
-        local okS, res = pcall(scr.setPrecise, true)
-        if okS and res ~= false then
-            win._screen = scr
-            win._prevPrecise = okP and prev or false
-            win.cellMode = false
-        end
+    -- збережене калібрування точного режиму (якщо користувач його вмикав)
+    local cfg = paint._cfg.load()
+    if cfg.precise then
+        win.offX, win.offY = cfg.offX or 0, cfg.offY or 0
+        paint.setPrecise(win, true)
     end
 
     newCanvas(win, 56, 32)   -- уточнюється при першому малюванні (авто-розмір)
@@ -398,7 +541,7 @@ function paint.init(win, initData)
 end
 
 function paint.close(win)
-    if win._screen then pcall(win._screen.setPrecise, win._prevPrecise or false) end
+    paint.setPrecise(win, false)
 end
 
 -- ============================================================
@@ -575,6 +718,8 @@ function paint.draw(win, gpu, cx, cy, cw, ch)
     cmd("Зберегти", 10, "save")
     cmd("↶ Скас.", 9, "undo", #win.undo > 0)
     cmd("↷ Повт.", 9, "redo", #win.redo > 0)
+    cmd(win.precise and "Точно:ТАК" or "Точно:НІ", 11, "togglePrecise")
+    cmd("Калібр.", 9, "calibrate", win.precise)
 
     -- полотно
     renderCanvas(win, gpu)
@@ -639,9 +784,23 @@ function paint.draw(win, gpu, cx, cy, cw, ch)
     local name = win.filepath and win.filepath:match("[^/]+$") or "без назви"
     local pos = win.px_pos and string.format("  x:%d y:%d", win.px_pos[1], win.px_pos[2]) or ""
     local info = string.format("%s · %dx%d%s · %s%s%s", toolName(win.tool), win.W, win.H, pos, name,
-        win.modified and " *" or "", win.cellMode and " · клітинки" or "")
+        win.modified and " *" or "", win.cellMode and " · клітинки" or " · точно")
     if win.status then info = win.status end
     gpu.set(cx + 1, cy + ch - 1, UI.truncate(info, cw - 2))
+
+    if win.calib then
+        local c = win.calib
+        local t = c.targets[c.step]
+        if t then
+            gpu.setBackground(T.warning); gpu.fill(win._vx, win._vy, win._vw, 3, " ")
+            gpu.setForeground(0x1B1B1B)
+            gpu.set(win._vx + 1, win._vy, UI.truncate(string.format("Калібрування курсора: мітка %d з %d", c.step, #c.targets), win._vw - 2))
+            gpu.set(win._vx + 1, win._vy + 1, UI.truncate("Клацніть у ЦЕНТР червоної клітинки кінчиком курсора.", win._vw - 2))
+            gpu.set(win._vx + 1, win._vy + 2, UI.truncate("Esc - скасувати (повернеться режим клітинок).", win._vw - 2))
+            gpu.setBackground(T.danger); gpu.setForeground(T.textOnAccent)
+            gpu.set(win._vx + t[1], win._vy + t[2], "+")
+        end
+    end
 
     if win.modal then drawModal(win, gpu, UI, T, cx, cy, cw, ch) end
 end
@@ -764,20 +923,6 @@ local function applyShape(win, d, x, y)
 end
 
 -- ── Курсор ────────────────────────────────────────────────
--- Дробова частина координат: 0 або 0.5 (центр клітинки) - це "квантовані"
--- значення, які віддає екран без precise-режиму. Будь-яка інша дробова
--- частина означає, що екран віддає точну позицію (півклітинки).
-local function frac(v) return v - math.floor(v) end
-local function quantized(v)
-    local f = frac(v)
-    return f < 1e-6 or f > 1 - 1e-6 or math.abs(f - 0.5) < 1e-6
-end
-
-local function notePointer(win, rx, ry)
-    if rx and ry and (not quantized(rx) or not quantized(ry)) then win.preciseSeen = true end
-    win.cellMode = not win.preciseSeen
-end
-
 -- Екранна позиція -> піксель полотна.
 -- Повертає x, y, cell. y завжди в пікселях; у режимі клітинок y = верхній
 -- піксель клітинки. clamp: затискати до меж перегляду (для drag поза вікном).
@@ -791,9 +936,8 @@ local function pointerPixel(win, mx, my, rx, ry, clamp, forceCell)
         c = math.max(0, math.min(win._vw - 1, c))
         r = math.max(0, math.min(win._vh - 1, r))
     end
-    notePointer(win, rx, ry)
     local cell
-    if forceCell ~= nil then cell = forceCell else cell = not win.preciseSeen end
+    if forceCell ~= nil then cell = forceCell else cell = not win.precise end
     local y = win.oy + r * 2
     if not cell and inside and ry then
         y = y + ((frac(ry) >= 0.5) and 1 or 0)
@@ -853,6 +997,12 @@ function paint.click(win, mx, my, btn, rx, ry)
     if not win._ui then return false end
     local UI = win._ui
 
+    -- калібрування курсора перехоплює всі кліки
+    if win.calib then
+        calibrationClick(win, rx, ry)
+        return true
+    end
+
     -- модальне вікно перехоплює все
     if win.modal then
         for _, e in ipairs(win.elements) do
@@ -882,7 +1032,9 @@ function paint.click(win, mx, my, btn, rx, ry)
             elseif a == "open" then askUnsaved(win, function() doOpen(win) end)
             elseif a == "save" then doSave(win)
             elseif a == "undo" then undo(win)
-            elseif a == "redo" then redo(win) end
+            elseif a == "redo" then redo(win)
+            elseif a == "togglePrecise" then togglePrecise(win)
+            elseif a == "calibrate" then startCalibration(win) end
             return true
         end
     end
@@ -897,7 +1049,7 @@ end
 
 function paint.drag(win, mx, my, btn, rx, ry)
     local d = win.drawing
-    if not d or win.modal then return false end
+    if not d or win.modal or win.calib then return false end
     local x, y = pointerPixel(win, mx, my, rx, ry, true, d.cell)
     win.px_pos = {x, y}
     if d.tool == "pencil" or d.tool == "eraser" then
@@ -929,6 +1081,15 @@ end
 -- Клавіатура
 -- ============================================================
 function paint.key(win, char, code)
+    if win.calib then
+        if code == 1 then
+            win.calib = nil
+            paint.setPrecise(win, false)
+            paint._cfg.save(win)
+            win.status = "Калібрування скасовано. Режим клітинок."
+        end
+        return true
+    end
     if win.modal then
         local m = win.modal
         if code == 1 then closeModal(win); return true end
@@ -956,6 +1117,8 @@ function paint.key(win, char, code)
             if t.key == ch then win.tool = t.id; return true end
         end
         if ch == "K" then doColor(win, "fg"); return true end
+        if ch == "P" then togglePrecise(win); return true end
+        if ch == "C" and win.precise then startCalibration(win); return true end
         if ch == "[" or ch == "-" then win.size = math.max(1, win.size - 1); return true end
         if ch == "]" or ch == "+" or ch == "=" then win.size = math.min(5, win.size + 1); return true end
         if ch == "U" then undo(win); return true end

@@ -19,7 +19,7 @@ A lightweight operating system for the OpenComputers Minecraft mod.
 Download the installer:
 
 ```lua
-wget -f https://raw.githubusercontent.com/FixlutGames21/FixOS/main/installer.lua /home/installer.lua && /home/installer.lua
+wget -f https://raw.githubusercontent.com/FixlutGames21/FixOS/main/installer.lua /home/installer.lua
 ```
 
 ### Installation Steps
@@ -87,3 +87,8 @@ Update Center працює за файлом `manifest.txt` у корені ре
 
 - FixPaint: режим миші визначається за самими подіями (дробові координати = точний режим; цілі/центри клітинок = режим клітинок, пензель займає клітинку цілком)
 - Нова бібліотека `system/lib/textfield.lua`: каретка, стрілки, Home/End/Delete, клік, прокрутка, Unicode; використовується в адресному рядку браузера, Update Center і діалогах FixPaint
+
+### 4.3.2 - курсор FixPaint
+
+- За замовчуванням режим клітинок: координати миші ті самі, що й у всій системі, клік займає клітинку під курсором цілком
+- Кнопка `Точно` (клавіша P) вмикає точний режим T3 і запускає калібрування (3 кліки по мітках); поправка зберігається в `/system/fixpaint.cfg` і застосовується в `desktop.lua` до всіх подій миші, поки режим увімкнено

@@ -73,7 +73,7 @@ local function showBoot()
 
     local logo = {
         "\xE2\x95\x94\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x97",
-        "\xE2\x95\x91  FixOS 4.3.1                    \xE2\x95\x91",
+        "\xE2\x95\x91  FixOS 4.3.2                    \xE2\x95\x91",
         "\xE2\x95\x91  OpenComputers Edition           \xE2\x95\x91",
         "\xE2\x95\x91  Fixed. Fast. Functional.        \xE2\x95\x91",
         "\xE2\x95\x9A\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x90\xE2\x95\x9D",
@@ -221,6 +221,19 @@ local WIN_SIZES = {
 -- ============================================================
 -- HELPERS
 -- ============================================================
+-- 4.3.2: поправка координат миші в "точному" режимі екрана T3.
+-- Деякі екрани віддають дробові координати зі зсувом (клік лягає на
+-- клітинку вище/лівіше). FixPaint калібрує зсув і публікує його в
+-- _G._FixPrecise; тут він додається до кожної події миші, тож і
+-- заголовок вікна, і кнопки влучають правильно.
+local function mouseFix(x, y)
+    local P = _G._FixPrecise
+    if P and type(x) == "number" and type(y) == "number" then
+        return x + (P.offX or 0), y + (P.offY or 0)
+    end
+    return x, y
+end
+
 local function safeCall(fn, ...)
     if type(fn) ~= "function" then return false end
     return pcall(fn, ...)
@@ -584,8 +597,8 @@ local function main()
         -- ── TOUCH ──────────────────────────────────────────
         if t == "touch" then
             local _,_,mx,my,btn = table.unpack(ev)
-            local rawX, rawY = mx, my   -- 4.3.0: дробові координати (precise-режим) для FixPaint
-            mx, my = math.floor(mx), math.floor(my)  -- guard against float coords
+            local rawX, rawY = mouseFix(mx, my)   -- дробові координати (precise-режим) для FixPaint
+            mx, my = math.floor(rawX), math.floor(rawY)  -- guard against float coords
             state.capture = nil
 
             if state.startOpen then
@@ -677,6 +690,7 @@ local function main()
         -- ── DRAG ───────────────────────────────────────────
         elseif t == "drag" then
             local _,_,rawX,rawY,btn = table.unpack(ev)
+            rawX, rawY = mouseFix(rawX, rawY)
             local mx, my = math.floor(rawX), math.floor(rawY)
             if state.capture then
                 local cw = state.capture
@@ -694,6 +708,7 @@ local function main()
         -- ── DROP ───────────────────────────────────────────
         elseif t == "drop" then
             local _,_,rawX,rawY,btn = table.unpack(ev)
+            rawX, rawY = mouseFix(rawX, rawY)
             state.drag = nil
             if state.capture then
                 local cw = state.capture
