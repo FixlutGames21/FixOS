@@ -23,6 +23,12 @@
 -- /system/fixpaint.cfg і застосовується в desktop.lua до всіх подій
 -- миші, поки точний режим увімкнено (тож і заголовок вікна, і кнопки
 -- влучають правильно).
+-- Окрім того є РУЧНИЙ ЗСУВ курсора в пікселях полотна (кнопка "Курсор",
+-- клавіша N): +x - вправо, +y - вниз. За замовчуванням (+1, +1): кінчик
+-- курсора Minecraft візуально лежить лівіше й вище за "тіло" стрілки, тож
+-- пікселі ставляться на 1 піксель правіше та нижче кінчика. Зсув діє на
+-- полотно в обох режимах (у режимі клітинок вертикальний зсув діє лише
+-- кроками по 2 пікселі - це одна клітинка).
 -- ==========================================================
 
 local paint = {}
@@ -386,6 +392,8 @@ function paint._cfg.load()
     cfg.precise = text:match("precise=(%d)") == "1"
     cfg.offX = tonumber(text:match("offx=(%-?[%d%.]+)"))
     cfg.offY = tonumber(text:match("offy=(%-?[%d%.]+)"))
+    cfg.nudgeX = tonumber(text:match("nudgex=(%-?%d+)"))
+    cfg.nudgeY = tonumber(text:match("nudgey=(%-?%d+)"))
     return cfg
 end
 
@@ -393,7 +401,8 @@ function paint._cfg.save(win)
     local fs = getFs()
     local h = fs.open(CFG_PATH, "w")
     if not h then return false end
-    fs.write(h, string.format("precise=%d\noffx=%.3f\noffy=%.3f\n", win.precise and 1 or 0, win.offX or 0, win.offY or 0))
+    fs.write(h, string.format("precise=%d\noffx=%.3f\noffy=%.3f\nnudgex=%d\nnudgey=%d\n",
+        win.precise and 1 or 0, win.offX or 0, win.offY or 0, win.nudgeX or 0, win.nudgeY or 0))
     fs.close(h)
     return true
 end
@@ -526,6 +535,8 @@ function paint.init(win, initData)
 
     -- збережене калібрування точного режиму (якщо користувач його вмикав)
     local cfg = paint._cfg.load()
+    win.nudgeX = cfg.nudgeX or 1      -- зсув курсора, пікселі полотна (вправо / вниз)
+    win.nudgeY = cfg.nudgeY or 1
     if cfg.precise then
         win.offX, win.offY = cfg.offX or 0, cfg.offY or 0
         paint.setPrecise(win, true)
@@ -620,11 +631,20 @@ end
 
 local function drawModal(win, gpu, UI, T, cx, cy, cw, ch)
     local m = win.modal
-    local bw = math.min(cw - 4, 54)
+    local bw = math.min(cw - 4, 62)
     local rows = 2 + #m.lines
     if m.input then rows = rows + 2 end
     if m.list then rows = rows + math.min(8, math.max(1, #m.list.items)) + 1 end
-    rows = rows + 2
+    -- кнопки розкладаються по рядах, щоб не виходити за межі вікна
+    local btnRows, cur, curW = {}, {}, 0
+    for i, b in ipairs(m.buttons) do
+        local w = math.max(8, ulen(b.label) + 4)
+        if curW > 0 and curW + 1 + w > bw - 4 then btnRows[#btnRows + 1] = cur; cur = {}; curW = 0 end
+        cur[#cur + 1] = {i = i, w = w}
+        curW = curW + (curW > 0 and 1 or 0) + w
+    end
+    if #cur > 0 then btnRows[#btnRows + 1] = cur end
+    rows = rows + 1 + #btnRows
     local bx = cx + math.floor((cw - bw) / 2)
     local by = cy + math.max(0, math.floor((ch - rows) / 2))
 
@@ -667,13 +687,15 @@ local function drawModal(win, gpu, UI, T, cx, cy, cw, ch)
         gpu.setBackground(T.surface)
     end
     -- кнопки
-    local bxn = bx + 2
-    local byn = by + rows - 2
-    for i, b in ipairs(m.buttons) do
-        local w = math.max(10, ulen(b.label) + 4)
-        UI.drawButton(bxn, byn, w, 1, b.label, b.style or "secondary", true)
-        addEl(win, bxn, byn, w, "modalBtn", {index = i})
-        bxn = bxn + w + 1
+    for ri, row in ipairs(btnRows) do
+        local bxn = bx + 2
+        local byn = by + rows - #btnRows + (ri - 1)
+        for _, it in ipairs(row) do
+            local b = m.buttons[it.i]
+            UI.drawButton(bxn, byn, it.w, 1, b.label, b.style or "secondary", true)
+            addEl(win, bxn, byn, it.w, "modalBtn", {index = it.i})
+            bxn = bxn + it.w + 1
+        end
     end
 end
 
@@ -719,7 +741,7 @@ function paint.draw(win, gpu, cx, cy, cw, ch)
     cmd("↶ Скас.", 9, "undo", #win.undo > 0)
     cmd("↷ Повт.", 9, "redo", #win.redo > 0)
     cmd(win.precise and "Точно:ТАК" or "Точно:НІ", 11, "togglePrecise")
-    cmd("Калібр.", 9, "calibrate", win.precise)
+    cmd("Курсор", 8, "cursorDlg")
 
     -- полотно
     renderCanvas(win, gpu)
@@ -903,7 +925,53 @@ local function modalButton(win, i)
     if b then b.fn() end
 end
 
-paint._modals = {new = doNew, save = doSave, open = doOpen}
+local function doCursor(win)
+    local m = {title = "Налаштування курсора", lines = {}, buttons = {}}
+    local function lines()
+        local l = {
+            "Режим: " .. (win.precise and "точний (піксель)" or "клітинки"),
+            string.format("Зсув курсора: x=%+d  y=%+d  (пікселі полотна)", win.nudgeX, win.nudgeY),
+            "+x - вправо, +y - вниз. Стрілки на клавіатурі = кнопки.",
+        }
+        if not win.precise then
+            l[#l + 1] = "Клітинки: вертикальний зсув діє по 2 пікселі. Для 1 пікселя - «Точно»."
+        end
+        return l
+    end
+    local function refresh() m.lines = lines(); paint._cfg.save(win) end
+    local function nudge(dx, dy)
+        return function()
+            win.nudgeX = math.max(-8, math.min(8, win.nudgeX + dx))
+            win.nudgeY = math.max(-8, math.min(8, win.nudgeY + dy))
+            refresh()
+        end
+    end
+    m.lines = lines()
+    m.buttons = {
+        {label = "< ліворуч", fn = nudge(-1, 0)},
+        {label = "праворуч >", fn = nudge(1, 0)},
+        {label = "^ вгору", fn = nudge(0, -1)},
+        {label = "v вниз", fn = nudge(0, 1)},
+        {label = "Скинути", fn = function() win.nudgeX, win.nudgeY = 0, 0; refresh() end},
+        {label = "Калібрувати", fn = function()
+            closeModal(win)
+            if win.precise then startCalibration(win)
+            else win.status = "Калібрування потрібне лише в точному режимі (кнопка «Точно»)." end
+        end},
+        {label = "Закрити", style = "accent", fn = function() closeModal(win) end},
+    }
+    m.enterIndex = 7
+    m.onKey = function(char, code)
+        if code == 203 then m.buttons[1].fn(); return true end
+        if code == 205 then m.buttons[2].fn(); return true end
+        if code == 200 then m.buttons[3].fn(); return true end
+        if code == 208 then m.buttons[4].fn(); return true end
+        return false
+    end
+    win.modal = m
+end
+
+paint._modals = {new = doNew, save = doSave, open = doOpen, cursor = doCursor}
 
 -- ============================================================
 -- Миша
@@ -942,7 +1010,7 @@ local function pointerPixel(win, mx, my, rx, ry, clamp, forceCell)
     if not cell and inside and ry then
         y = y + ((frac(ry) >= 0.5) and 1 or 0)
     end
-    return win.ox + c, y, cell
+    return win.ox + c + (win.nudgeX or 0), y + (win.nudgeY or 0), cell
 end
 
 local function applyShape(win, d, x, y)
@@ -969,6 +1037,9 @@ local function beginStroke(win, x, y, btn, cell)
     local tool = win.tool
     local color = (btn == 1) and win.bg or win.fg
     win.px_pos = {x, y}
+    if (tool == "picker" or tool == "fill") and (x < 0 or y < 0 or x >= win.W or y >= win.H) then
+        return false
+    end
     if tool == "picker" then
         if btn == 1 then win.bg = win.px[y * win.W + x + 1] or win.bg
         else win.fg = win.px[y * win.W + x + 1] or win.fg end
@@ -1034,7 +1105,7 @@ function paint.click(win, mx, my, btn, rx, ry)
             elseif a == "undo" then undo(win)
             elseif a == "redo" then redo(win)
             elseif a == "togglePrecise" then togglePrecise(win)
-            elseif a == "calibrate" then startCalibration(win) end
+            elseif a == "cursorDlg" then paint._modals.cursor(win) end
             return true
         end
     end
@@ -1093,7 +1164,8 @@ function paint.key(win, char, code)
     if win.modal then
         local m = win.modal
         if code == 1 then closeModal(win); return true end
-        if code == 28 or code == 156 then modalButton(win, 1); return true end
+        if code == 28 or code == 156 then modalButton(win, m.enterIndex or 1); return true end
+        if m.onKey and m.onKey(char, code) then return true end
         if m.input then
             loadTF().key(m.input, char, code)
             return true
@@ -1118,6 +1190,7 @@ function paint.key(win, char, code)
         end
         if ch == "K" then doColor(win, "fg"); return true end
         if ch == "P" then togglePrecise(win); return true end
+        if ch == "N" then doCursor(win); return true end
         if ch == "C" and win.precise then startCalibration(win); return true end
         if ch == "[" or ch == "-" then win.size = math.max(1, win.size - 1); return true end
         if ch == "]" or ch == "+" or ch == "=" then win.size = math.min(5, win.size + 1); return true end

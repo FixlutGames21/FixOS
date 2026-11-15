@@ -27,11 +27,11 @@ import zlib
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-OS_VERSION = "4.3.2"
+OS_VERSION = "4.3.3"
 
 # (id, назва, версія, прапорці, залежності, [шаблони файлів])
 COMPONENTS = [
-    ("core", "FixOS Core", "4.3.2", "reboot", "", [
+    ("core", "FixOS Core", "4.3.3", "reboot", "", [
         "boot/init.lua", "system/ui.lua", "system/lang.lua", "system/version.lua",
         "system/desktop.lua", "system/language/*.lang", "system/icons/*.png", "version.txt"]),
     ("netlib", "Network library", "1.0.0", "", "", ["system/lib/net.lua"]),
@@ -40,7 +40,7 @@ COMPONENTS = [
     ("browser", "Browser", "4.2.1", "", "netlib,htmllib,textlib", ["system/programs/browser.lua"]),
     ("updater", "Update Center", "2.0.1", "", "netlib,textlib",
         ["system/lib/updater.lua", "system/programs/updatecenter.lua"]),
-    ("fixpaint", "FixPaint", "1.2.0", "", "textlib", ["system/programs/fixpaint.lua"]),
+    ("fixpaint", "FixPaint", "1.3.0", "", "textlib", ["system/programs/fixpaint.lua"]),
     ("devmgr", "Device Manager", "1.0.0", "", "", ["system/programs/devmgr.lua"]),
     ("explorer", "Explorer", "4.3.0", "", "", ["system/programs/explorer.lua"]),
     ("settings", "Settings", "4.3.0", "", "", ["system/programs/settings.lua"]),
@@ -51,6 +51,7 @@ COMPONENTS = [
 ]
 
 CHANGELOG = [
+    ("4.3.3", "FixPaint: налаштовуваний зсув курсора (за замовчуванням +1 вправо, +1 вниз), діалог Курсор"),
     ("4.3.2", "FixPaint: курсор без зсуву (режим клітинок за замовчуванням, точний режим з калібруванням)"),
     ("4.3.1", "Курсор: точне визначення режиму миші у FixPaint; текстовий курсор (каретка) у полях введення"),
     ("4.3.0", "Нові програми: FixPaint, Device Manager"),
