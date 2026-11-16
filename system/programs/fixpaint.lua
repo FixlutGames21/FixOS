@@ -24,11 +24,12 @@
 -- миші, поки точний режим увімкнено (тож і заголовок вікна, і кнопки
 -- влучають правильно).
 -- Окрім того є РУЧНИЙ ЗСУВ курсора в пікселях полотна (кнопка "Курсор",
--- клавіша N): +x - вправо, +y - вниз. За замовчуванням (+1, +1): кінчик
--- курсора Minecraft візуально лежить лівіше й вище за "тіло" стрілки, тож
--- пікселі ставляться на 1 піксель правіше та нижче кінчика. Зсув діє на
--- полотно в обох режимах (у режимі клітинок вертикальний зсув діє лише
--- кроками по 2 пікселі - це одна клітинка).
+-- клавіша N): +x - вправо, +y - вниз. За замовчуванням (+1, +2): клік
+-- реєструється на клітинку лівіше й вище за курсор (виміряно за скріншотом),
+-- тож пікселі ставляться на 1 колонку правіше та 1 клітинку (2 пікселі)
+-- нижче. Зсув діє в обох режимах (у режимі клітинок вертикальний зсув діє
+-- кроками по 2 пікселі - це одна клітинка). Кнопка "Калібрувати" вимірює
+-- зсув автоматично: 3 кліки по мітках (в режимі клітинок - цілі клітинки).
 -- ==========================================================
 
 local paint = {}
@@ -392,6 +393,7 @@ function paint._cfg.load()
     cfg.precise = text:match("precise=(%d)") == "1"
     cfg.offX = tonumber(text:match("offx=(%-?[%d%.]+)"))
     cfg.offY = tonumber(text:match("offy=(%-?[%d%.]+)"))
+    cfg.ver = tonumber(text:match("ver=(%d+)")) or 0
     cfg.nudgeX = tonumber(text:match("nudgex=(%-?%d+)"))
     cfg.nudgeY = tonumber(text:match("nudgey=(%-?%d+)"))
     return cfg
@@ -401,7 +403,7 @@ function paint._cfg.save(win)
     local fs = getFs()
     local h = fs.open(CFG_PATH, "w")
     if not h then return false end
-    fs.write(h, string.format("precise=%d\noffx=%.3f\noffy=%.3f\nnudgex=%d\nnudgey=%d\n",
+    fs.write(h, string.format("ver=4\nprecise=%d\noffx=%.3f\noffy=%.3f\nnudgex=%d\nnudgey=%d\n",
         win.precise and 1 or 0, win.offX or 0, win.offY or 0, win.nudgeX or 0, win.nudgeY or 0))
     fs.close(h)
     return true
@@ -444,7 +446,7 @@ end
 -- Калібрування: 3 мітки; користувач клацає в центр кожної
 local function startCalibration(win)
     local vw, vh = win._vw or 56, win._vh or 17
-    win.calib = {step = 1, samples = {},
+    win.calib = {step = 1, samples = {}, mode = win.precise and "precise" or "cell",
         targets = {{5, 5}, {math.max(8, vw - 6), math.max(7, vh - 4)}, {math.floor(vw / 2), math.floor(vh / 2) + 1}}}
     win.status = nil
 end
@@ -452,6 +454,26 @@ end
 local function finishCalibration(win)
     local c = win.calib
     local n = #c.samples
+    if c.mode == "cell" then
+        -- цілі клітинки: різниця між міткою та клітинкою, яку отримала програма
+        local d0 = c.samples[1]
+        local same = true
+        for _, smp in ipairs(c.samples) do
+            if smp.dx ~= d0.dx or smp.dy ~= d0.dy then same = false end
+        end
+        win.calib = nil
+        if not same then
+            startCalibration(win)
+            win.status = "Кліки потрапили в різні клітинки відносно міток. Цільтеся точно в центр мітки."
+            return
+        end
+        win.nudgeX = math.max(-8, math.min(8, d0.dx))
+        win.nudgeY = math.max(-8, math.min(8, 2 * d0.dy))
+        paint._cfg.save(win)
+        win.status = string.format("Калібрування збережено: зсув x=%+d y=%+d пікселів (%+d кол., %+d кл.)",
+            win.nudgeX, win.nudgeY, d0.dx, d0.dy)
+        return
+    end
     local sx, sy, minx, maxx, miny, maxy = 0, 0, math.huge, -math.huge, math.huge, -math.huge
     local allQuant = true
     for _, smp in ipairs(c.samples) do
@@ -490,8 +512,15 @@ local function isQuant(v)
     return f < 1e-6 or f > 1 - 1e-6 or math.abs(f - 0.5) < 1e-6
 end
 
-local function calibrationClick(win, rx, ry)
+local function calibrationClick(win, mx, my, rx, ry)
     local c = win.calib
+    if c.mode == "cell" then
+        local t = c.targets[c.step]
+        c.samples[#c.samples + 1] = {dx = (win._vx + t[1]) - math.floor(mx), dy = (win._vy + t[2]) - math.floor(my)}
+        c.step = c.step + 1
+        if c.step > #c.targets then finishCalibration(win) end
+        return
+    end
     if not rx or not ry then return end
     local t = c.targets[c.step]
     local cxm, cym = win._vx + t[1] + 0.5, win._vy + t[2] + 0.5
@@ -535,8 +564,13 @@ function paint.init(win, initData)
 
     -- збережене калібрування точного режиму (якщо користувач його вмикав)
     local cfg = paint._cfg.load()
-    win.nudgeX = cfg.nudgeX or 1      -- зсув курсора, пікселі полотна (вправо / вниз)
-    win.nudgeY = cfg.nudgeY or 1
+    -- зсув курсора, пікселі полотна (вправо / вниз). Конфіги старіших версій
+    -- (без ver=4) мали неправильні значення за замовчуванням - скидаємо їх.
+    if (cfg.ver or 0) >= 4 then
+        win.nudgeX, win.nudgeY = cfg.nudgeX or 1, cfg.nudgeY or 2
+    else
+        win.nudgeX, win.nudgeY = 1, 2
+    end
     if cfg.precise then
         win.offX, win.offY = cfg.offX or 0, cfg.offY or 0
         paint.setPrecise(win, true)
@@ -763,7 +797,7 @@ function paint.draw(win, gpu, cx, cy, cw, ch)
     y = y + 0
     gpu.setBackground(T.surface)
     gpu.setForeground(win.fillShapes and T.success or T.textSecondary)
-    gpu.set(sideX, y, (win.fillShapes and "[x]" or "[ ]") .. " Суцільні фігури")
+    gpu.set(sideX, y, (win.fillShapes and "[x]" or "[ ]") .. " Суцільні")
     addEl(win, sideX, y, SIDE_W, "toggleFill")
     y = y + 2
 
@@ -818,7 +852,7 @@ function paint.draw(win, gpu, cx, cy, cw, ch)
             gpu.setForeground(0x1B1B1B)
             gpu.set(win._vx + 1, win._vy, UI.truncate(string.format("Калібрування курсора: мітка %d з %d", c.step, #c.targets), win._vw - 2))
             gpu.set(win._vx + 1, win._vy + 1, UI.truncate("Клацніть у ЦЕНТР червоної клітинки кінчиком курсора.", win._vw - 2))
-            gpu.set(win._vx + 1, win._vy + 2, UI.truncate("Esc - скасувати (повернеться режим клітинок).", win._vw - 2))
+            gpu.set(win._vx + 1, win._vy + 2, UI.truncate(c.mode == "cell" and "Esc - скасувати." or "Esc - скасувати (повернеться режим клітинок).", win._vw - 2))
             gpu.setBackground(T.danger); gpu.setForeground(T.textOnAccent)
             gpu.set(win._vx + t[1], win._vy + t[2], "+")
         end
@@ -953,11 +987,7 @@ local function doCursor(win)
         {label = "^ вгору", fn = nudge(0, -1)},
         {label = "v вниз", fn = nudge(0, 1)},
         {label = "Скинути", fn = function() win.nudgeX, win.nudgeY = 0, 0; refresh() end},
-        {label = "Калібрувати", fn = function()
-            closeModal(win)
-            if win.precise then startCalibration(win)
-            else win.status = "Калібрування потрібне лише в точному режимі (кнопка «Точно»)." end
-        end},
+        {label = "Калібрувати", fn = function() closeModal(win); startCalibration(win) end},
         {label = "Закрити", style = "accent", fn = function() closeModal(win) end},
     }
     m.enterIndex = 7
@@ -1070,7 +1100,7 @@ function paint.click(win, mx, my, btn, rx, ry)
 
     -- калібрування курсора перехоплює всі кліки
     if win.calib then
-        calibrationClick(win, rx, ry)
+        calibrationClick(win, mx, my, rx, ry)
         return true
     end
 
@@ -1154,10 +1184,15 @@ end
 function paint.key(win, char, code)
     if win.calib then
         if code == 1 then
+            local wasCell = win.calib.mode == "cell"
             win.calib = nil
-            paint.setPrecise(win, false)
-            paint._cfg.save(win)
-            win.status = "Калібрування скасовано. Режим клітинок."
+            if wasCell then
+                win.status = "Калібрування скасовано."
+            else
+                paint.setPrecise(win, false)
+                paint._cfg.save(win)
+                win.status = "Калібрування скасовано. Режим клітинок."
+            end
         end
         return true
     end
@@ -1191,7 +1226,7 @@ function paint.key(win, char, code)
         if ch == "K" then doColor(win, "fg"); return true end
         if ch == "P" then togglePrecise(win); return true end
         if ch == "N" then doCursor(win); return true end
-        if ch == "C" and win.precise then startCalibration(win); return true end
+        if ch == "C" then startCalibration(win); return true end
         if ch == "[" or ch == "-" then win.size = math.max(1, win.size - 1); return true end
         if ch == "]" or ch == "+" or ch == "=" then win.size = math.min(5, win.size + 1); return true end
         if ch == "U" then undo(win); return true end

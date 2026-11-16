@@ -104,7 +104,7 @@ end
 UI.init(gpu)
 local T = UI.Theme
 
-local VERSION   = "4.3.3"
+local VERSION   = "4.3.4"
 local MIN_SPACE = 1024 * 512   -- 512 KB minimum
 local REPO      = "https://raw.githubusercontent.com/FixlutGames21/FixOS/main"
 

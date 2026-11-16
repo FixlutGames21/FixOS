@@ -1,13 +1,13 @@
 manifest=1
-os=4.3.3
+os=4.3.4
 repo=FixlutGames21/FixOS
 branch=main
-component|core|FixOS Core|4.3.3|reboot|
+component|core|FixOS Core|4.3.4|reboot|
 file|core|boot/init.lua|/init.lua|16633|b280eaf6
 file|core|system/ui.lua|/system/ui.lua|14367|208e23cc
 file|core|system/lang.lua|/system/lang.lua|2712|39494054
 file|core|system/version.lua|/system/version.lua|1682|a95f06f8
-file|core|system/desktop.lua|/system/desktop.lua|31546|411154f6
+file|core|system/desktop.lua|/system/desktop.lua|31546|ae3854f7
 file|core|system/language/en.lang|/system/language/en.lang|2060|e9cfde11
 file|core|system/language/ru.lang|/system/language/ru.lang|2151|d967053b
 file|core|system/language/uk.lang|/system/language/uk.lang|2801|8d9bbd99
@@ -18,7 +18,7 @@ file|core|system/icons/mycomputer.png|/system/icons/mycomputer.png|200|fbb841ac
 file|core|system/icons/notepad.png|/system/icons/notepad.png|237|048154ce
 file|core|system/icons/settings.png|/system/icons/settings.png|238|3941592d
 file|core|system/icons/terminal.png|/system/icons/terminal.png|201|fe4a4743
-file|core|version.txt|/version.txt|5|02e900f7
+file|core|version.txt|/version.txt|5|02ea00f8
 component|netlib|Network library|1.0.0||
 file|netlib|system/lib/net.lua|/system/lib/net.lua|27914|5033d127
 component|htmllib|HTML renderer|1.0.0||
@@ -30,8 +30,8 @@ file|browser|system/programs/browser.lua|/system/programs/browser.lua|37964|24ad
 component|updater|Update Center|2.0.1||netlib,textlib
 file|updater|system/lib/updater.lua|/system/lib/updater.lua|33685|7648e476
 file|updater|system/programs/updatecenter.lua|/system/programs/updatecenter.lua|27261|e67acf9d
-component|fixpaint|FixPaint|1.3.0||textlib
-file|fixpaint|system/programs/fixpaint.lua|/system/programs/fixpaint.lua|50725|19eb8d6b
+component|fixpaint|FixPaint|1.4.0||textlib
+file|fixpaint|system/programs/fixpaint.lua|/system/programs/fixpaint.lua|52620|eee79675
 component|devmgr|Device Manager|1.0.0||
 file|devmgr|system/programs/devmgr.lua|/system/programs/devmgr.lua|22003|4e5c5622
 component|explorer|Explorer|4.3.0||
@@ -46,6 +46,7 @@ component|terminal|Terminal|4.0.1||
 file|terminal|system/programs/terminal.lua|/system/programs/terminal.lua|13553|dc5881b2
 component|mycomputer|My Computer|4.0.1||
 file|mycomputer|system/programs/mycomputer.lua|/system/programs/mycomputer.lua|11505|f3271f79
+log|4.3.4|FixPaint: зсув курсора +1 колонка / +2 пікселі вниз за замовчуванням, автокалібрування в режимі клітинок
 log|4.3.3|FixPaint: налаштовуваний зсув курсора (за замовчуванням +1 вправо, +1 вниз), діалог Курсор
 log|4.3.2|FixPaint: курсор без зсуву (режим клітинок за замовчуванням, точний режим з калібруванням)
 log|4.3.1|Курсор: точне визначення режиму миші у FixPaint; текстовий курсор (каретка) у полях введення
